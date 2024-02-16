@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = 'BlendPATH'
+description='Blending Pipeline Analysis Tool for Hydrogen'
+authors = [
+    {name="Jamie Kee",email="Jamie.Kee@nrel.gov"},
+    {name="Evan Reznicek",email="Evan.Reznicek@nrel.gov"},
+    {name="Kevin Topolski",email="Kevin.Topolski@nrel.gov"},
+]
+version = '0.1'
+readme = "README.md"
+requires-python  = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "cantera",
+    "openpyxl",
+    "xlsxwriter",
+    "ProFAST@git+https://github.com/NREL/ProFAST",
+]

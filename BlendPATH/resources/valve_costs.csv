@@ -1,0 +1,86 @@
+﻿"Data Description and Source: Installed valve cost data provided below is extrapolated from  ""American Gas Association, American Petroleum Institute, American Public Gas Association, & Interstate Natural Gas Association of America. (2019). Response to Notice of Review of Guidance. Interstate Natural Gas Association of America. https://ingaa.org/wp-content/uploads/2019/05/36377.pdf"" and from industry partner input",,
+DN,Install Type,Installed Valve Cost [2020$]
+100,"Above ground, bolted",261706
+150,"Above ground, bolted",294420
+200,"Above ground, bolted",327133
+250,"Above ground, bolted",359846
+300,"Above ground, bolted",392560
+350,"Above ground, bolted",425273
+400,"Above ground, bolted",457986
+450,"Above ground, bolted",490700
+500,"Above ground, bolted",523413
+550,"Above ground, bolted",556126
+600,"Above ground, bolted",588840
+650,"Above ground, bolted",621553
+700,"Above ground, bolted",654266
+750,"Above ground, bolted",686979
+800,"Above ground, bolted",719693
+850,"Above ground, bolted",752406
+900,"Above ground, bolted",785119
+1000,"Above ground, bolted",850546
+1050,"Above ground, bolted",883259
+1100,"Above ground, bolted",915973
+1150,"Above ground, bolted",948686
+1200,"Above ground, bolted",981399
+1300,"Above ground, bolted",1046826
+1400,"Above ground, bolted",1112252
+1500,"Above ground, bolted",1177679
+1600,"Above ground, bolted",1243106
+1700,"Above ground, bolted",1308532
+1800,"Above ground, bolted",1373959
+100,"Above ground, welded",392560
+150,"Above ground, welded",441630
+200,"Above ground, welded",490700
+250,"Above ground, welded",539770
+300,"Above ground, welded",588840
+350,"Above ground, welded",637909
+400,"Above ground, welded",686979
+450,"Above ground, welded",736049
+500,"Above ground, welded",785119
+550,"Above ground, welded",834189
+600,"Above ground, welded",883259
+650,"Above ground, welded",932329
+700,"Above ground, welded",981399
+750,"Above ground, welded",1030469
+800,"Above ground, welded",1079539
+850,"Above ground, welded",1128609
+900,"Above ground, welded",1177679
+1000,"Above ground, welded",1275819
+1050,"Above ground, welded",1324889
+1100,"Above ground, welded",1373959
+1150,"Above ground, welded",1423029
+1200,"Above ground, welded",1472099
+1300,"Above ground, welded",1570239
+1400,"Above ground, welded",1668379
+1500,"Above ground, welded",1766519
+1600,"Above ground, welded",1864658
+1700,"Above ground, welded",1962798
+1800,"Above ground, welded",2060938
+100,Buried,523413
+150,Buried,588840
+200,Buried,654266
+250,Buried,719693
+300,Buried,785119
+350,Buried,850546
+400,Buried,915973
+450,Buried,981399
+500,Buried,1046826
+550,Buried,1112252
+600,Buried,1177679
+650,Buried,1243106
+700,Buried,1308532
+750,Buried,1373959
+800,Buried,1439385
+850,Buried,1504812
+900,Buried,1570239
+1000,Buried,1701092
+1050,Buried,1766519
+1100,Buried,1831945
+1050,Buried,1766519
+1200,Buried,1962798
+1300,Buried,2093652
+1400,Buried,2224505
+1500,Buried,2355358
+1600,Buried,2486211
+1700,Buried,2617064
+1800,Buried,2747918
