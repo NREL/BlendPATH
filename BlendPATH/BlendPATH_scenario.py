@@ -209,6 +209,7 @@ class BlendPATH_scenario():
         self.init_CS_names = gcs_df['Name'].values
         self.init_CS_fuel,_,_ = daf.get_compressor_usage(mydll,self.init_CS_names,'kg/s') # kg/s for fuel usage on initial run
         self.GCV_fuel = mydll.evalFloat('GNO.0.NQ!GCV')
+
         self.original_CS_rating = list({k:self.original_CS_rating[k] for k in self.init_CS_names}.values()) # Save the original compressor ratings. Needed to see if upgrades are required
 
         
@@ -608,7 +609,9 @@ class BlendPATH_scenario():
 
         original_cap_pipes,orig_cap_costing = get_original_pipe_cost()
 
-        if self.mod_type=='direct_replacement' and self.blending<=0.10:
+        if self.mod_type=='direct_replacement' and self.blending<=0: # self.blending limit was previously set to 10% to account for potential limits w/ compressor speed. 
+                                                                     # However, fluid properties (vol. flow rate, low inlet pressure) for blending are assumed to change  
+                                                                     # significantly such that you may need to refurb compressor anyway 
             revamped_compressors_i = get_compressor_cost(avg_station_cap,num_comp_stations,revamped_ratio=0.16)
         else:
             revamped_compressors_i = get_compressor_cost(avg_station_cap,num_comp_stations,revamped_ratio=0.66)
@@ -1291,6 +1294,7 @@ class BlendPATH_scenario():
         mydll_new, status = daf.runSAInt(mydll_new,f'{self.save_directory}NetworkFiles/{self.batch_id}_{self.casestudy_name}','_new')
 
         CS_fuel,CS_rating,comp_params = daf.get_compressor_usage(mydll_new,CS_names) # MMBTU/hr for CS_fuel
+        CS_PR = comp_params['Pressure ratio [-]'].tolist()
 
         if mod_type == 'additional_compressors':
             comp_locations = daf.compressor_locations(f'{self.save_directory}NetworkFiles/',f'{self.batch_id}_{self.casestudy_name}'+'_Network_new.xlsx')
@@ -1312,4 +1316,4 @@ class BlendPATH_scenario():
         demand_errors['Error (%)'] = (demand_errors['Demand flow targets [MW]']-demand_errors['Actual demand flows [MW]'])/(demand_errors['Demand flow targets [MW]']+1e-6)*100
 
 
-        return {'CS_fuel':CS_fuel,'CS_rating':CS_rating,'compressor_specs':compressor_specs,'demand_errors':demand_errors, 'Status': status}
+        return {'CS_fuel':CS_fuel,'CS_rating':CS_rating,'CS_PR':CS_PR,'compressor_specs':compressor_specs,'demand_errors':demand_errors, 'Status': status}
