@@ -1,0 +1,3 @@
+﻿"Data Description and Source: Meter replacement costs are presented in the form of a linear cost correlation (Installed Cost [2020$] = m*x +b, where x is updated meter capacity). Linear cost correlation data is derived from ""Kotter, G., & Stapler. R. (2001). 2003 Kern River Expansion Project Application for Certificate of Public Convenience and Necessity. Federal Energy Regulatory Commission."" and ""Kotter, G., & Snarr, S. (2001). California Emergency Action Application for Temporary and Permanent Certificates of Public Convenience and Necessity with Pre-Granted Partial Abandonment. Federal Energy Regulatory Commission.",
+m [2020$/MMBTU-day],b [2020$]
+0.762,256092

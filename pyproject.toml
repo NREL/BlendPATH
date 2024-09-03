@@ -3,22 +3,23 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = 'BlendPATH'
-description='Blending Pipeline Analysis Tool for Hydrogen'
+name = 'BlendPATH_v2'
+description='Blending Pipeline Analysis Tool for Hydrogen v2'
 authors = [
     {name="Jamie Kee",email="Jamie.Kee@nrel.gov"},
     {name="Evan Reznicek",email="Evan.Reznicek@nrel.gov"},
     {name="Kevin Topolski",email="Kevin.Topolski@nrel.gov"},
 ]
-version = '0.1'
+version = '2.0'
 readme = "README.md"
-requires-python  = ">=3.10"
+requires-python  = "==3.8.19"
 dependencies = [
     "numpy",
-    "scipy",
     "pandas",
-    "cantera",
+    "cantera==3.0.0",
+    "importlib_resources",
     "openpyxl",
     "xlsxwriter",
     "ProFAST@git+https://github.com/NREL/ProFAST",
+    "pytest"
 ]
