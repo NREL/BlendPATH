@@ -1,0 +1,30 @@
+﻿"Data Description and Source: Inline inspection cost data provided below is taken from  ""ICF International. (2016). Cost and Benefit Impact Analysis of the PHMSA Natural Gas Gathering and Transmission Safety Regulation Proposal. American Petroleum Institute. https://www.energyinfrastructure.org/-/media/energyinfrastructure/images/pipeline/related-docs/icf-api-ria-analysissafety-of-gas-transm.pdf"" and from industry partner input",
+DN,ILI cost [2020$/mi]
+100,5576
+150,5576
+200,5576
+250,23920
+300,23920
+350,24250
+400,24250
+450,24250
+500,24250
+550,24250
+600,24250
+650,24580
+700,24580
+750,24580
+800,24580
+850,24580
+900,24580
+1000,24580
+1050,24580
+1100,24580
+1150,24580
+1200,24580
+1300,24580
+1400,24580
+1500,24580
+1600,24580
+1700,24580
+1800,24580

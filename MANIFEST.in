@@ -1,2 +1,3 @@
-include BlendPATH/resources/*
-include BlendPATH/examples/*
+graft BlendPATH/costing
+include BlendPATH/util/pipe_dimensions_metric.csv
+include BlendPATH/network/pipeline_components/gasphase.yaml
