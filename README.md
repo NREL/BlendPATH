@@ -1,5 +1,5 @@
 # Blending Pipeline Analysis Tool for Hydrogen
-Welcome to the Blending Pipeline Analysis Tool for Hydrogen (BlendPATH) [SWR-24-10](https://www.osti.gov/biblio/2309692). This is a Python-based tool. The instructions below assumes that the user possesses background knowledge in Python and has Anaconda installed. Below is a quick-start guide:
+Welcome to the Blending Pipeline Analysis Tool for Hydrogen (BlendPATH) [SWR-24-10](https://www.osti.gov/biblio/2309692). This is a Python-based tool. The instructions below assumes that the user possesses background knowledge in Python and has Anaconda installed. Below is a quick-start guide: 
 
 # Installation
 The BlendPATH repository can by cloned to your local computer using:
