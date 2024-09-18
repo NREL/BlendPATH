@@ -97,6 +97,7 @@ class Composition:
         Calculate higher heating value of mixture using Cantera in MJ/kg
         """
         ctu.gas.TPX = 298.15, ct.one_atm, self.x_str
+        self.mw = ctu.gas.mean_molecular_weight
         mole_frac_fuel = 1 - ctu.gas["N2"].Y[0] - ctu.gas["CO2"].Y[0]
         jf_X = self.just_fuel()
         ctu.gas.set_equivalence_ratio(1.0, jf_X, "O2:1.0")

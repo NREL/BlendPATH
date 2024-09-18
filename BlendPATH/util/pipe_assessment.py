@@ -98,19 +98,21 @@ def get_material_performance_factor(
     """
 
     # Set material performance factor to 1 based on ASME Code Case
-    return 1
+    if design_option != "a":
+        return 1
+
     # if design_option_formatted in ["b", "no fracture criterion", "nfc", "a"]:
     #     return 1  # Set material performance factor to 1
 
     # # Design pressures in ASME B31.12 Table IX-5A in MPa (converted from psi)
-    # design_pressures = np.array(
-    #     [6.8948, 13.7895, 15.685, 16.5474, 17.9264, 19.3053, 20.6843]
-    # )
+    design_pressures = np.array(
+        [6.8948, 13.7895, 15.685, 16.5474, 17.9264, 19.3053, 20.6843]
+    )
 
     # # B31.12 Table IX-5A for stresses and design pressure in MPa
-    # h_f_array = get_hf_array(SMYS=SMYS, SMTS=SMTS)
+    h_f_array = get_hf_array(SMYS=SMYS, SMTS=SMTS)
 
-    # return np.interp(design_p_MPa, design_pressures, h_f_array)
+    return np.interp(design_p_MPa, design_pressures, h_f_array)
 
 
 def get_hf_array(SMYS: float, SMTS: float) -> list:

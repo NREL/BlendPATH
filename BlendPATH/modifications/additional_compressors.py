@@ -1,10 +1,12 @@
 import copy
 
+import cantera as ct
 import numpy as np
 from pandas import DataFrame, ExcelWriter
 
 import BlendPATH.costing.costing as bp_cost
 import BlendPATH.Global as gl
+import BlendPATH.network.pipeline_components.cantera_util as ctu
 from BlendPATH.network import pipeline_components as bp_plc
 from BlendPATH.network.BlendPATH_network import BlendPATH_network, Design_params
 
@@ -620,7 +622,25 @@ def get_num_compressors(
     if offtakes[-1] == 0:
         offtakes = offtakes[:-1]
     n_comps = 0
-    while n_comps < 200:
+
+    # Guess n comps
+    ctu.gas.TPX = gl.T_FIXED, ct.one_atm, composition.x_str
+    mw = ctu.gas.mean_molecular_weight
+    zrt = 1 * ctu.gas_constant * gl.T_FIXED
+    p_val = (p_in**2 - (p_in / cr_max) ** 2) ** 0.5
+    f = 0.01
+    d_m = d * gl.MM2M
+    area = np.pi * d_m**2 / 4
+    l_seg = mw / zrt * d_m / f * (sum(all_mdot) / area / p_val) ** -2
+
+    max_comps = 200
+    n_comps = min(max([int(l_total / (l_seg / gl.KM2M)), 0]), max_comps - 1)
+
+    sols = []
+    n_comps_tried = []
+    relax = 1.5
+
+    while 0 <= n_comps < 200 and n_comps not in n_comps_tried:
         addl_comps, end_node, l_comps, pipe_in = make_compressor_network(
             n_comps=n_comps,
             composition=composition,
@@ -637,15 +657,20 @@ def get_num_compressors(
             new_comps_elec=new_comps_elec,
         )
         try:
-            addl_comps.solve()
+            addl_comps.solve(relax, cr_max=cr_max)
         except ValueError as err_val:
             if err_val.args[0] in ["Negative pressure", "Pressure below threshold"]:
                 # if negative pressure than increase compressors
+                n_comps_tried.append(n_comps)
                 n_comps += 1
             if err_val.args[0] in [f"Could not converge in {gl.MAX_ITER} iterations"]:
                 # if negative pressure than increase compressors
+                n_comps_tried.append(n_comps)
                 n_comps += 1
                 # return np.inf, [], [], [], -1, None
+        except ct.CanteraError:
+            relax *= 1.05
+            continue
         else:
             # Check if outlet pressure satisfies target pressure
             if end_node.pressure >= p_out:
@@ -660,16 +685,23 @@ def get_num_compressors(
                         cs_ratio_check = True
                         break
                 if cs_ratio_check:
+                    n_comps_tried.append(n_comps)
                     n_comps += 1
                     continue
-                return (
-                    n_comps,
-                    l_comps,
-                    cs_fuel,
-                    cs_fuel_elec,
-                    pipe_in.m_dot,
-                    addl_comps.compressors,
+
+                sols.append(
+                    (
+                        n_comps,
+                        l_comps,
+                        cs_fuel,
+                        cs_fuel_elec,
+                        pipe_in.m_dot,
+                        addl_comps.compressors,
+                    )
                 )
+                n_comps_tried.append(n_comps)
+                n_comps -= 1
             else:
+                n_comps_tried.append(n_comps)
                 n_comps += 1
-    return
+    return sols[-1]

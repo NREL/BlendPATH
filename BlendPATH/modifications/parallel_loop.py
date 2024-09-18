@@ -755,6 +755,10 @@ def get_loop_length(
                 slope = (p_vals[-1] - p_vals[-2]) / (l_vals[-1] - l_vals[-2])
                 intercept = p_vals[-1] - slope * l_vals[-1]
                 l_loop = (p_out_target - intercept) / slope
+                if l_loop <= 0:
+                    slope = (p_vals[-1] - p_vals[0]) / (l_vals[-1] - l_vals[0])
+                    intercept = p_vals[-1] - slope * l_vals[-1]
+                    l_loop = (p_out_target - intercept) / slope
         else:
             l_loop = np.mean(l_bounds)
 

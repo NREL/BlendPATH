@@ -291,7 +291,7 @@ def calc_lcot(
         escalation=gen_inflation,
     )
 
-    depr_period = 30
+    depr_period = pf.vals["operating life"]
     # Add new pipe capex
     pf.add_capital_item(
         name=col_names["new_pipe"],

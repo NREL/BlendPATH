@@ -104,7 +104,7 @@ def direct_replacement(
                     < final_outlet_pressure * gl.MPA2PA
                 ):
                     raise ValueError("Final outlet pressure")
-            except ValueError:
+            except (ValueError, ct.CanteraError):
                 diameter_sweep[ps_i] = True
 
         # Check if compressor ratio is over max
@@ -165,6 +165,7 @@ def direct_replacement(
     # Run LCOT sweep
     lcot_vals = []
     rerun_for_all = True
+    rrfa_i = 0
     while rerun_for_all:
 
         seg_options_slim = [seg_options[i] for i, v in enumerate(seg_options) if v]
@@ -381,7 +382,10 @@ def direct_replacement(
         # Change to allow all segments to change if
         if not lcot_vals and valid_options:
             rerun_for_all = True
-            seg_no_change = [False] * n_ps
+            # seg_no_change = [False] * n_ps
+            seg_no_change[rrfa_i] = False
+            rrfa_i += 1
+
         else:
             rerun_for_all = False
 
