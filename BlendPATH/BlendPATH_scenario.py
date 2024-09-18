@@ -11,6 +11,7 @@ import cantera as ct
 import BlendPATH.costing.costing as bp_cost
 import BlendPATH.modifications as bp_mod
 import BlendPATH.util.pipe_assessment as bp_pa
+import BlendPATH.network.pipeline_components as bp_plc
 
 from . import Global as gl
 from .network import BlendPATH_network, Design_params
@@ -761,6 +762,17 @@ class BlendPATH_scenario:
         params_out.append(("Meter station modification", meter_cost, "$"))
         params_out.append(("Valve modifications", valve_cost, "$"))
         # params_out.append(("Original network residual value", 0, "$"))
+
+        # Get energy ratio of H2
+        pure_h2 = bp_plc.Composition({"H2": 1})
+        GCV_H2_MJpsm3 = pure_h2.get_GCV()
+        pure_ch4 = bp_plc.Composition(self.network.composition.pure_x)
+        GCV_NG_MJpsm3 = pure_ch4.get_GCV()
+
+        blend_ratio_energy = (self.blend * GCV_H2_MJpsm3) / (
+            (self.blend * GCV_H2_MJpsm3) + (1 - self.blend) * GCV_NG_MJpsm3
+        )
+        params_out.append(("Hydrogen energy ratio", blend_ratio_energy * 100, "%"))
 
         params_out = pd.DataFrame(params_out, columns=["Parameter", "Value", "Units"])
         startrow = 0

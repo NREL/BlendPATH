@@ -75,7 +75,7 @@ class TestFinancialOverrides:
             design_option="nfc",
             blend=0.5,
         )
-        assert wangetal.run_mod("pl") == pytest.approx(0.349012830807369)
+        assert wangetal.run_mod("pl") == pytest.approx(0.35646559739223427)
 
     def test_invalid_financial_override_name(self):
         with pytest.raises(ValueError):
@@ -94,15 +94,15 @@ class TestWangNFC(TestExampleFile):
         self.wangetal.update_design_option(design_option="nfc")
         self.wangetal.blendH2(blend=0.5)
         lcot = self.wangetal.run_mod("dr")
-        assert lcot == pytest.approx(0.4314880034390952)
+        assert lcot == pytest.approx(0.44095427136854426)
 
     def test_wang_50_pl_nfc(self):
         lcot = self.wangetal.run_mod("pl")
-        assert lcot == pytest.approx(0.392927081805103)
+        assert lcot == pytest.approx(0.4003798437248687)
 
     def test_wang_50_ac_nfc(self):
         lcot = self.wangetal.run_mod("ac")
-        assert lcot == pytest.approx(0.698920145455941)
+        assert lcot == pytest.approx(0.70501602694301)
 
 
 class TestDesignOption(TestExampleFile):

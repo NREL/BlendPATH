@@ -224,7 +224,7 @@ class BlendPATH_network:
             composition=composition,
         )
 
-    def initialize(self, supply_node: plc.Supply_node) -> np.ndarray:
+    def initialize(self, supply_node: plc.Supply_node, cr_max: float) -> np.ndarray:
         """
         Set initial guess of pressures
         """
@@ -331,8 +331,11 @@ class BlendPATH_network:
             for pipe in comp.to_node.connections["Pipe"]:
                 init_pressure(comp.to_node, get_new_node(comp.to_node, pipe), pipe)
 
+        # Preset compressor inlet to be based on CR
         for comp in self.compressors.values():
-            comp.from_node.pressure = comp.to_node.pressure / 1.5
+            if comp.name == "Supply compressor":
+                continue
+            comp.from_node.pressure = comp.to_node.pressure / cr_max
 
         for n in self.nodes.values():
             p_init[n.index] = n.pressure
@@ -432,7 +435,7 @@ class BlendPATH_network:
             dn.recalc_mdot()
         self.reassign_offtakes()
 
-    def solve(self, c_relax=gl.RELAX_FACTOR) -> None:
+    def solve(self, c_relax: float = gl.RELAX_FACTOR, cr_max: float = 1.5) -> None:
         """
         Solve network pressures
         """
@@ -448,7 +451,7 @@ class BlendPATH_network:
         m_dot_target[supply_node.node.index] = -1 * m_dot_sum
 
         # Initialize pressure and set the state of each node
-        p_init = self.initialize(supply_node)
+        p_init = self.initialize(supply_node, cr_max=cr_max)
 
         # Loop
         p_solving = p_init
