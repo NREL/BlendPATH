@@ -2,8 +2,11 @@ from dataclasses import dataclass, field
 
 import cantera as ct
 
-from . import Composition, Compressor, Pipe, eos
+import BlendPATH.Global as gl
+
+from . import Composition, Compressor, Pipe
 from . import cantera_util as ctu
+from . import eos
 
 
 @dataclass
@@ -19,6 +22,7 @@ class Node:
     X: float = "CH4:1"
     connections: dict = field(default_factory=lambda: {"Pipe": [], "Comp": []})
     is_demand: bool = False
+    thermo_curvefit: bool = False
 
     def clear_connections(self) -> None:
         """
@@ -43,16 +47,14 @@ class Node:
         """
         Update the temperature, pressure, and composition at the node. Calculate rho and z based on EOS
         """
-        p_abs = p + ct.one_atm
-        ctu.gas.TPX = T, p_abs, X.x_str
-        rho = ctu.gas.density  # kg/m3
-        mw = ctu.gas.mean_molecular_weight  # g/mol
-        self.mw = mw
-        self.pressure = p
-        self.cp = ctu.gas.cp_mass
-        self.cv = ctu.gas.cv_mass
 
-        rho, z = eos.get_rz(p_gauge=p, T_K=T, X=X, eos=eos_type, mw=mw)
+        self.mw = X.mw
+        self.pressure = p
+
+        if self.thermo_curvefit:
+            rho, z = self.X.get_curvefit_rho_z(p_gauge_pa=p)
+        else:
+            rho, z = eos.get_rz(p_gauge=p, T_K=T, X=X, eos=eos_type, mw=X.mw)
 
         self.z = z
         self.rho = rho
@@ -64,3 +66,11 @@ class Node:
         Get the higher heating value at the node
         """
         return self.X.HHV
+
+    @property
+    def cpcv(self):
+        """
+        Heat capacity
+        """
+        ctu.gas.TPX = gl.T_FIXED, self.pressure + ct.one_atm, self.X.x_str
+        return ctu.gas.cp_mass / ctu.gas.cv_mass

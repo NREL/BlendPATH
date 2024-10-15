@@ -97,9 +97,9 @@ class PipeSegment:
             .to_dict(orient="split")
         )
 
-        design_pressure = (
-            self.pressure_ASME_MPa if ASME_pressure_flag else self.p_max_mpa_g
-        )
+        # by default use the rating of original pipe. If set to none, the we are using
+        # DR method, and don't know what the pipe pressure will be
+        design_pressure = self.pressure_ASME_MPa if ASME_pressure_flag else None
 
         (th, schedule, pressure, index) = bp_pa.get_viable_schedules(
             sch_list,
@@ -111,7 +111,12 @@ class PipeSegment:
             check_DN,
         )
         if return_all:
-            return (th, schedule, pressure)
+            _, unique_indexes = np.unique(th, return_index=True)
+            return (
+                [th[i] for i in unique_indexes],
+                [schedule[i] for i in unique_indexes],
+                [pressure[i] for i in unique_indexes],
+            )
         else:
             if index == -1:
                 return (None, np.nan, None)

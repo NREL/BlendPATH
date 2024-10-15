@@ -1,4 +1,5 @@
 import copy
+import math
 
 import numpy as np
 from pandas import DataFrame, ExcelWriter
@@ -56,6 +57,7 @@ def parallel_loop(
                     "DN",
                     "loop_length",
                     "add_supply_comp",
+                    "inlet_p",
                 ]
             }
             for i, x in enumerate(nw.pipe_segments)
@@ -78,6 +80,27 @@ def parallel_loop(
         m_dot_in_prev = nw.pipe_segments[-1].mdot_out
         for ps_i, ps in reversed(list(enumerate(nw.pipe_segments))):
             dn_options, od_options = ps.get_DNs(10)
+
+            # loop thru inlet pressures
+            supp_p_list = [ps.pressure_ASME_MPa]
+            if ps_i == 0:
+                og_pressure = nw.supply_nodes[
+                    list(nw.supply_nodes.keys())[0]
+                ].pressure_mpa
+
+                if og_pressure < ps.pressure_ASME_MPa:
+                    supp_p_list = (
+                        [og_pressure]
+                        + list(
+                            range(
+                                math.ceil(og_pressure),
+                                math.floor(ps.pressure_ASME_MPa),
+                                1,
+                            )
+                        )
+                        + [ps.pressure_ASME_MPa]
+                    )
+
             pressure_in_MPa = ps.pressure_ASME_MPa
             pressure_in_Pa = pressure_in_MPa * gl.MPA2PA
             pressure_out_MPa = (prev_ASME_pressure / gl.MPA2PA) / CR_ratio
@@ -159,125 +182,160 @@ def parallel_loop(
                     else:
                         all_mdot[-1] = total_mdot_out
 
-                    loop_length, m_dot_seg = get_loop_length(
-                        composition=composition,
-                        d_main=ps.diameter,
-                        d_loop=d_inner_mm,
-                        l_total=l_total,
-                        HHV=ps.HHV,
-                        p_in=pressure_in_MPa,
-                        p_out_target=pressure_out_Pa,
-                        offtakes=ps.offtake_lengths,
-                        offtakes_mdot=all_mdot,
-                        roughness_mm=ps.pipes[0].roughness_mm,
-                        eos=nw.eos,
-                    )
+                    supp_p_min_res = []
+                    for sup_p in supp_p_list:
 
-                    if np.isnan(loop_length):
-                        continue
-                    dn_satisfied = True
+                        loop_length, m_dot_seg = get_loop_length(
+                            composition=composition,
+                            d_main=ps.diameter,
+                            d_loop=d_inner_mm,
+                            l_total=l_total,
+                            HHV=ps.HHV,
+                            p_in=sup_p,
+                            p_out_target=pressure_out_Pa,
+                            offtakes=ps.offtake_lengths,
+                            offtakes_mdot=all_mdot,
+                            roughness_mm=ps.pipes[0].roughness_mm,
+                            eos=nw.eos,
+                            thermo_curvefit=nw.thermo_curvefit,
+                        )
 
-                    loop_cost = bp_cost.get_pipe_material_cost(
-                        cp=costing_params,
-                        di_mm=d_inner_mm,
-                        do_mm=d_outer_mm,
-                        l_km=loop_length,
-                        grade=grade,
-                    )
+                        if np.isnan(loop_length):
+                            continue
+                        dn_satisfied = True
 
-                    # Check LCOT for segment
-                    segment_lcot = 0
-                    new_pipe_cap = 0
-                    if loop_length > 0:
-                        anl_cap = bp_cost.get_pipe_other_cost(
+                        loop_cost = bp_cost.get_pipe_material_cost(
                             cp=costing_params,
-                            d_mm=dn,
+                            di_mm=d_inner_mm,
+                            do_mm=d_outer_mm,
                             l_km=loop_length,
-                            anl_types=["Labor", "Misc", "ROW"],
+                            grade=grade,
                         )
-                        anl_cap_sum = sum(anl_cap.values())
-                        new_pipe_cap = anl_cap_sum + loop_cost
-                    capacity = sum(all_mdot) * ps.HHV * gl.MW2MMBTUDAY
-                    fuel_use = cs_fuel_use[ps_i] * ps.HHV * gl.MW2MMBTUDAY
-                    elec_use = cs_fuel_use_elec[ps_i] * gl.DAY2HR / gl.KW2W
 
-                    # Check if supply compressor needed
-                    sn = nw.supply_nodes[list(nw.supply_nodes.keys())[0]]
-                    orig_supply_pressure = min(sn.pressure_mpa, ps.pressure_ASME_MPa)
-                    add_supply_comp = False
-                    if (
-                        sn.node.name in ps_nodes
-                        and orig_supply_pressure < ps.pressure_ASME_MPa
-                    ):
-                        add_supply_comp = True
-                        from_node = bp_plc.Node(
-                            name="comp_to_node",
-                            X=sn.node.X,
-                            pressure=orig_supply_pressure * gl.MPA2PA,
+                        # Check LCOT for segment
+                        segment_lcot = 0
+                        new_pipe_cap = 0
+                        if loop_length > 0:
+                            anl_cap = bp_cost.get_pipe_other_cost(
+                                cp=costing_params,
+                                d_mm=dn,
+                                l_km=loop_length,
+                                anl_types=["Labor", "Misc", "ROW"],
+                            )
+                            anl_cap_sum = sum(anl_cap.values())
+                            new_pipe_cap = anl_cap_sum + loop_cost
+                        capacity = sum(all_mdot) * ps.HHV * gl.MW2MMBTUDAY
+                        fuel_use = cs_fuel_use[ps_i] * ps.HHV * gl.MW2MMBTUDAY
+                        elec_use = cs_fuel_use_elec[ps_i] * gl.DAY2HR / gl.KW2W
+
+                        # Check if supply compressor needed
+                        sn = nw.supply_nodes[list(nw.supply_nodes.keys())[0]]
+                        orig_supply_pressure = min(
+                            sn.pressure_mpa, ps.pressure_ASME_MPa
                         )
-                        supply_comp = bp_plc.Compressor(
-                            name="new_supply_comp",
-                            from_node=from_node,
-                            to_node=bp_plc.Node(name="comp_to_node", X=sn.node.X),
-                            pressure_out_mpa_g=pressure,
-                            fuel_extract=not design_params.new_comp_elec,
+                        add_supply_comp = False
+                        if sn.node.name in ps_nodes and orig_supply_pressure < sup_p:
+                            add_supply_comp = True
+                            from_node = bp_plc.Node(
+                                name="comp_to_node",
+                                X=sn.node.X,
+                                pressure=orig_supply_pressure * gl.MPA2PA,
+                            )
+                            supply_comp = bp_plc.Compressor(
+                                name="new_supply_comp",
+                                from_node=from_node,
+                                to_node=bp_plc.Node(name="comp_to_node", X=sn.node.X),
+                                pressure_out_mpa_g=pressure,
+                                fuel_extract=not design_params.new_comp_elec,
+                            )
+                            supply_comp_fuel = {
+                                "gas": supply_comp.get_fuel_use(m_dot=m_dot_seg)
+                                * ps.HHV
+                                * gl.MW2MMBTUDAY
+                                / capacity,
+                                "elec": supply_comp.fuel_electric_W
+                                * gl.DAY2HR
+                                / gl.KW2W
+                                / capacity,
+                            }
+
+                            supply_comp_capex += supply_comp.get_cap_cost(
+                                cp=costing_params
+                            )
+
+                        # Get meter,ILI,valve costs
+                        # Get all demands
+
+                        meter_cost = bp_cost.meter_reg_station_cost(
+                            cp=costing_params, demands_MW=demands_MW
                         )
-                        supply_comp_fuel = {
-                            "gas": supply_comp.get_fuel_use(m_dot=m_dot_seg)
-                            * ps.HHV
-                            * gl.MW2MMBTUDAY
-                            / capacity,
-                            "elec": supply_comp.fuel_electric_W
-                            * gl.DAY2HR
-                            / gl.KW2W
-                            / capacity,
-                        }
+                        ili_costs = bp_cost.ili_cost(
+                            cp=costing_params, pipe_added=[(dn, loop_length)]
+                        )
+                        valve_cost = bp_cost.valve_replacement_cost(
+                            costing_params,
+                            [(dn, loop_length)],
+                            ASME_params.location_class,
+                        )
 
-                        supply_comp_capex += supply_comp.get_cap_cost(cp=costing_params)
+                        price_breakdown = bp_cost.calc_lcot(
+                            json_file=costing_params.casestudy_name,
+                            capacity=capacity,
+                            new_pipe_cap=new_pipe_cap,
+                            comp_cost=comp_cost,
+                            revamped_comp_capex=revamped_comp_capex,
+                            supply_comp_capex=supply_comp_capex,
+                            compressor_fuel=fuel_use / capacity,
+                            compressor_fuel_elec=elec_use / capacity,
+                            supply_comp_fuel=supply_comp_fuel,
+                            cs_cost=costing_params.cf_price,
+                            elec_cost=costing_params.elec_price,
+                            meter_cost=meter_cost,
+                            ili_costs=ili_costs,
+                            valve_cost=valve_cost,
+                            original_network_residual_value=costing_params.original_pipeline_cost,
+                            financial_overrides=costing_params.financial_overrides,
+                        )
+                        segment_lcot = price_breakdown[
+                            "LCOT: Levelized cost of transport"
+                        ]
 
-                    # Get meter,ILI,valve costs
-                    # Get all demands
+                        supp_p_min_res.append(
+                            (
+                                segment_lcot,
+                                loop_cost,
+                                loop_length,
+                                add_supply_comp,
+                                sup_p,
+                            )
+                        )
 
-                    meter_cost = bp_cost.meter_reg_station_cost(
-                        cp=costing_params, demands_MW=demands_MW
+                    if not supp_p_min_res:
+                        continue
+                    lcot_p_spply = [x[0] for x in supp_p_min_res]
+                    idxmin_lcot_p_supp = lcot_p_spply.index(min(lcot_p_spply))
+
+                    res[cr_i][ps_i]["costs"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][0]
                     )
-                    ili_costs = bp_cost.ili_cost(
-                        cp=costing_params, pipe_added=[(dn, loop_length)]
+                    res[cr_i][ps_i]["mat_costs"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][1]
                     )
-                    valve_cost = bp_cost.valve_replacement_cost(
-                        costing_params, [(dn, loop_length)], ASME_params.location_class
-                    )
-
-                    price_breakdown = bp_cost.calc_lcot(
-                        json_file=costing_params.casestudy_name,
-                        capacity=capacity,
-                        new_pipe_cap=new_pipe_cap,
-                        comp_cost=comp_cost,
-                        revamped_comp_capex=revamped_comp_capex,
-                        supply_comp_capex=supply_comp_capex,
-                        compressor_fuel=fuel_use / capacity,
-                        compressor_fuel_elec=elec_use / capacity,
-                        supply_comp_fuel=supply_comp_fuel,
-                        cs_cost=costing_params.cf_price,
-                        elec_cost=costing_params.elec_price,
-                        meter_cost=meter_cost,
-                        ili_costs=ili_costs,
-                        valve_cost=valve_cost,
-                        original_network_residual_value=costing_params.original_pipeline_cost,
-                        financial_overrides=costing_params.financial_overrides,
-                    )
-                    segment_lcot = price_breakdown["LCOT: Levelized cost of transport"]
-
-                    res[cr_i][ps_i]["costs"].append(segment_lcot)
-                    res[cr_i][ps_i]["mat_costs"].append(loop_cost)
                     res[cr_i][ps_i]["grades"].append(grade)
                     res[cr_i][ps_i]["ths"].append(th)
                     res[cr_i][ps_i]["schedules"].append(schedule)
                     res[cr_i][ps_i]["pressures"].append(pressure)
                     res[cr_i][ps_i]["inner diameters"].append(d_inner_mm)
                     res[cr_i][ps_i]["DN"].append(dn)
-                    res[cr_i][ps_i]["loop_length"].append(loop_length)
-                    res[cr_i][ps_i]["add_supply_comp"].append(add_supply_comp)
+                    res[cr_i][ps_i]["loop_length"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][2]
+                    )
+                    res[cr_i][ps_i]["add_supply_comp"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][3]
+                    )
+                    res[cr_i][ps_i]["inlet_p"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][4]
+                    )
 
             # Update the previous segment pressure for use in fuel extraction calc
             # m_dot_seg isnt changing with grade and diameter
@@ -432,9 +490,9 @@ def parallel_loop(
         new_supply["node_name"].append(supply.node.name)
 
         p_max = np.inf
-
-        for pipe in supply.node.connections["Pipe"]:
-            p_max = min(pipe.pressure_ASME_MPa, p_max)
+        p_max = min_vals[0]["inlet_p"]
+        # for pipe in supply.node.connections["Pipe"]:
+        #     p_max = min(pipe.pressure_ASME_MPa, p_max)
 
         new_supply["pressure_mpa_g"].append(p_max)
         new_supply["flowrate_MW"].append("")
@@ -469,7 +527,9 @@ def parallel_loop(
             comp.eta_comp_s if comp.fuel_extract else comp.eta_comp_s_elec
         )
         new_comps["eta_driver"].append(
-            comp.eta_driver if comp.fuel_extract else comp.eta_driver_elec_used
+            comp.eta_driver
+            if comp.fuel_extract
+            else np.nan  # comp.eta_driver_elec_used
         )
 
         # Assume to node has to be the outlet pressure
@@ -580,6 +640,7 @@ def make_loop_network(
     d_loop: float,
     roughness_mm: float,
     eos: bp_plc.eos._EOS_OPTIONS = "rk",
+    thermo_curvefit: bool = False,
 ) -> tuple:
     """
     Create new network to simulate the parallel looped segment
@@ -681,6 +742,7 @@ def make_loop_network(
         composition=composition,
     )
     looping.set_eos(eos=eos)
+    looping.set_thermo_curvefit(thermo_curvefit)
     return looping, end_node, n_ds_in.connections["Pipe"]
 
 
@@ -696,6 +758,7 @@ def get_loop_length(
     offtakes_mdot: list,
     roughness_mm: float,
     eos: bp_plc.eos._EOS_OPTIONS = "rk",
+    thermo_curvefit: bool = False,
 ) -> tuple:
     """
     Determine the loop length to satisfy constraints
@@ -720,6 +783,7 @@ def get_loop_length(
             d_loop=d_loop,
             roughness_mm=roughness_mm,
             eos=eos,
+            thermo_curvefit=thermo_curvefit,
         )
         try:
             looping.solve()
@@ -784,6 +848,7 @@ def get_loop_length(
             d_loop=d_loop,
             roughness_mm=roughness_mm,
             eos=eos,
+            thermo_curvefit=thermo_curvefit,
         )
 
         # If negative pressure, solve will provide a Value error

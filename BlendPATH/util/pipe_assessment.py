@@ -238,16 +238,20 @@ def get_viable_schedules(
 
     # Get SMYS and SMTS based on grade
     SMYS, SMTS = get_SMYS_SMTS(grade)
-    th = get_th_from_ASME(
-        design_p_MPa=p_max_mpa_g,
-        design_option=design_option,
-        SMYS=SMYS,
-        SMTS=SMTS,
-        D=DN,
-        F=design_factor,
-        E=ASME_params.joint_factor,
-        T=ASME_params.T_rating,
-    )
+    # only get minimum th if there is a design pressure
+    if p_max_mpa_g is None:
+        th = 0
+    else:
+        th = get_th_from_ASME(
+            design_p_MPa=p_max_mpa_g,
+            design_option=design_option,
+            SMYS=SMYS,
+            SMTS=SMTS,
+            D=DN,
+            F=design_factor,
+            E=ASME_params.joint_factor,
+            T=ASME_params.T_rating,
+        )
     # Check if availalbe thickness are >= to required thickness
     if max(th_vals) >= th:
         th_vals_valid = th_vals[th_vals >= th]
@@ -256,7 +260,7 @@ def get_viable_schedules(
         for i in range(len(th_vals_valid)):
             pressure_valid.append(
                 get_design_pressure_ASME(
-                    design_p_MPa=p_max_mpa_g,
+                    design_p_MPa=1 if p_max_mpa_g is None else p_max_mpa_g,
                     design_option=design_option,
                     SMYS=SMYS,
                     SMTS=SMTS,
@@ -300,7 +304,7 @@ def check_design_option(design_option: str):
             if not (0 <= design_option_formatted <= 1):
                 raise ValueError()
 
-        except:
+        except ValueError:
             raise ValueError(f"{design_option} is not a valid design option")
 
     return design_option_formatted
