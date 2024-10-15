@@ -4,7 +4,7 @@ Welcome to the Blending Pipeline Analysis Tool for Hydrogen (BlendPATH) [SWR-24-
 # Installation
 The BlendPATH repository can by cloned to your local computer using:
 
-`git clone https://github.nrel.gov/Hyblend/BlendPATH.git`
+`git clone https://github.com/NREL/BlendPATH.git`
 
 ## Create environment
 A conda environoment can useful for satisfying the Python requirement. First, open an anaconda powershell. Within the powershell, we will first create a conda environment to install BlendPATH in. This command below creates a conda environment called `BlendPATH_env`. The second argument is the Python version. We default to 3.8.19 for compatibility with Cantera for some Mac OSX users. However, more experienced users may relax this constraint in the [configuration file](pyproject.toml) Note: you may swap `BlendPATH_env` with whatever you would like to name the environment
