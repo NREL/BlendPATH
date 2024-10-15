@@ -547,7 +547,7 @@ def direct_replacement(
         for pipe in comp.to_node.connections["Pipe"]:
             for ps_i, ps in enumerate(nw.pipe_segments):
                 if pipe in ps.pipes:
-                    if ps_i in combo_final:
+                    if not no_change and ps_i in combo_final:
                         if ps_i > 0 and nw.pipe_segments[ps_i - 1].comps:
                             p_max = min_geom.pressure
                     else:
