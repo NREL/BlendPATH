@@ -3,15 +3,15 @@ import os
 import re
 from typing import Literal, get_args
 
+import cantera as ct
 import numpy as np
 import pandas as pd
 from importlib_resources import files
-import cantera as ct
 
 import BlendPATH.costing.costing as bp_cost
 import BlendPATH.modifications as bp_mod
-import BlendPATH.util.pipe_assessment as bp_pa
 import BlendPATH.network.pipeline_components as bp_plc
+import BlendPATH.util.pipe_assessment as bp_pa
 
 from . import Global as gl
 from .network import BlendPATH_network, Design_params
@@ -66,6 +66,7 @@ class BlendPATH_scenario:
             "compressor_markup": 1,
             "financial_overrides": {},
             "filename_suffix": "",
+            "thermo_curvefit": False,
         }
         self.read_inputs(temp_inputs)
 
@@ -146,6 +147,7 @@ class BlendPATH_scenario:
             f"{self.casestudy_name}/network_design.xlsx"
         )
         self.network.set_eos(self.eos)
+        self.network.set_thermo_curvefit(self.thermo_curvefit)
 
         # Set design option
         self.update_design_option(self.design_option, init=True)
@@ -186,6 +188,7 @@ class BlendPATH_scenario:
                         "verbose",
                         "new_compressors_electric",
                         "existing_compressors_to_electric",
+                        "thermo_curvefit",
                     ]:
                         val = val in ["TRUE", "True", "true", 1]
                     if row[0] == "design_CR":
@@ -365,6 +368,7 @@ class BlendPATH_scenario:
             new_filename_full, subsegments=False
         )
         new_network.set_eos(self.eos)
+        new_network.set_thermo_curvefit(self.thermo_curvefit)
 
         iters = 0
         while iters < 5:
@@ -375,8 +379,7 @@ class BlendPATH_scenario:
                 iters += 1
                 continue
         else:
-            raise ValueError("Cound not solve new network")
-
+            raise ValueError("Could not solve new network")
         # Calculate ANL costs
         # and get new pipe capex cost
         new_pipe_cap = 0
@@ -1068,7 +1071,7 @@ class BlendPATH_scenario:
                 "Electric power (kW)",
                 "Rating (MW)",
                 "Isentropic efficiency",
-                "Mechanical efficiency",
+                "Driver efficiency",
                 "Cost ($)",
                 "Revamp cost ($)",
                 "Total cost ($)",

@@ -28,6 +28,7 @@ class BlendPATH_network:
         compressors: dict = None,
         composition: list = None,
         eos: _EOS_OPTIONS = "rk",
+        thermo_curvefit: bool = False,
     ) -> None:
         """
         Initialize a network
@@ -40,6 +41,7 @@ class BlendPATH_network:
         self.supply_nodes = supply_nodes if supply_nodes is not None else {}
         self.compressors = compressors if compressors is not None else {}
         self.composition = composition
+        self.set_thermo_curvefit(thermo_curvefit)
         self.set_eos(eos)
 
         self.assign_node_indices()
@@ -907,6 +909,16 @@ class BlendPATH_network:
 
         ### Closeout
         writer._save()
+
+    def set_thermo_curvefit(self, thermo_curvefit: bool) -> None:
+        """
+        Set thermo curvefit for nodes
+        """
+        self.thermo_curvefit = thermo_curvefit
+        for node in self.nodes.values():
+            node.thermo_curvefit = thermo_curvefit
+        for pipe in self.pipes.values():
+            pipe.thermo_curvefit = thermo_curvefit
 
 
 @dataclass

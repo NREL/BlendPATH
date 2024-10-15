@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 import cantera as ct
+import numpy as np
 import pandas as pd
 
 import BlendPATH.Global as gl
@@ -36,6 +37,7 @@ class Composition:
         self.as_str()
         self.get_comp()
         self.calc_heating_value()
+        self.make_linear_interp()
 
     @classmethod
     def from_df(cls, df: pd.DataFrame):
@@ -62,6 +64,7 @@ class Composition:
         self.as_str()
         self.get_comp()
         self.calc_heating_value()
+        self.make_linear_interp()
 
     def just_fuel(self) -> str:
         """
@@ -126,3 +129,31 @@ class Composition:
         mw = ctu.gas.mean_molecular_weight
         v = ctu.gas.volume_mole
         return self.HHV * mw / v
+
+    def make_linear_interp(self):
+        p_vals = np.linspace(0, 20 * gl.MPA2PA, 75)
+        rho_vals = []
+        mu_vals = []
+        for p in p_vals:
+            ctu.gas.TPX = gl.T_FIXED, p + ct.one_atm, self.x_str
+            rho_vals.append(ctu.gas.density)
+            mu_vals.append(ctu.gas.viscosity)
+
+        self.curve_fit_rho = (p_vals / gl.MPA2PA, np.array(rho_vals))
+        self.curve_fit_mu = (p_vals / gl.MPA2PA, np.array(mu_vals))
+
+    def get_curvefit_rho_z(self, p_gauge_pa):
+        p_abs_pa = p_gauge_pa + ct.one_atm
+        p_gauge_mpa = p_gauge_pa / gl.MPA2PA
+
+        rho = np.interp(p_gauge_mpa, self.curve_fit_rho[0], self.curve_fit_rho[1])
+        z = p_abs_pa * self.mw / ctu.R_GAS / gl.T_FIXED / rho
+        if rho < 0:
+            raise ValueError("Negative pressure")
+        return rho, z
+
+    def get_curvefit_mu(self, p_gauge_pa):
+        p_gauge_mpa = p_gauge_pa / gl.MPA2PA
+
+        mu = np.interp(p_gauge_mpa, self.curve_fit_mu[0], self.curve_fit_mu[1])
+        return mu

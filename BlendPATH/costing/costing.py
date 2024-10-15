@@ -167,9 +167,11 @@ def get_pipe_other_cost(
     """
     Get material and other costs for pipes
     """
+    all_other_cost = {x: 0 for x in ["Mat"] + anl_types}
+    if l_km == 0:
+        return all_other_cost
     d_in = d_mm * gl.MM2IN
     l_mi = l_km * gl.KM2MI
-    all_other_cost = {x: 0 for x in ["Mat"] + anl_types}
     per_in_mi_costs = {x: 0 for x in anl_types}
     for x in per_in_mi_costs.keys():
         if x in cp.pipe_cost_override.keys():
@@ -256,8 +258,8 @@ def calc_lcot(
         "ili": "In-line inspection",
         "fuel": "Compressor fuel",
         "fuel_elec": "Compressor fuel (electric)",
-        "supply_fuel_elec": "Supply commpressor fuel",
-        "supply_fuel_gas": "Supply commpressor fuel (electric)",
+        "supply_fuel_elec": "Supply commpressor fuel (electric)",
+        "supply_fuel_gas": "Supply commpressor fuel",
     }
 
     # Add compressor fuel (gas and electric)

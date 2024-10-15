@@ -31,6 +31,7 @@ class Pipe:
     grade: str = ""
     p_max_mpa_g: float = 0
     m_dot: float = None
+    thermo_curvefit: bool = False
 
     def __post_init__(self) -> None:
         self.diameter_out_mm = self.diameter_mm + 2 * self.thickness_mm
@@ -137,12 +138,16 @@ class Pipe:
         L = self.length_km * gl.KM2M
 
         p_avg = 2 / 3 * (p_in + p_out - p_in * p_out / (p_in + p_out)) - ct.one_atm
-        ctu.gas.TPX = T, p_avg + ct.one_atm, self.from_node.X.x_str
-        mu = ctu.gas.viscosity
 
-        rho_avg, z_avg = eos.get_rz(
-            p_gauge=p_avg, T_K=T, X=self.from_node.X, eos=eos_type, mw=mw
-        )
+        if self.thermo_curvefit:
+            rho_avg, z_avg = self.from_node.X.get_curvefit_rho_z(p_gauge_pa=p_avg)
+            mu = self.from_node.X.get_curvefit_mu(p_gauge_pa=p_avg)
+        else:
+            ctu.gas.TPX = T, p_avg + ct.one_atm, self.from_node.X.x_str
+            mu = ctu.gas.viscosity
+            rho_avg, z_avg = eos.get_rz(
+                p_gauge=p_avg, T_K=T, X=self.from_node.X, eos=eos_type, mw=mw
+            )
 
         if self.m_dot is None:
             Re = 1e8
@@ -183,8 +188,7 @@ class Pipe:
         """
         v = [self.v_from, self.v_to]
         c = [
-            np.sqrt(x.cp / x.cv * x.pressure / x.rho)
-            for x in [self.from_node, self.to_node]
+            np.sqrt(x.cpcv * x.pressure / x.rho) for x in [self.from_node, self.to_node]
         ]
         m = [v[x] / c[x] for x in [0, 1]]
         return max(m)

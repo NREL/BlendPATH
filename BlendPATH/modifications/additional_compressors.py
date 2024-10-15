@@ -1,4 +1,5 @@
 import copy
+import math
 
 import cantera as ct
 import numpy as np
@@ -47,22 +48,45 @@ def additional_compressors(
     cs_fuel_use_elec = [0] * n_ps
 
     n_cr = len(max_CR)
-    cr_lcot = [[]] * n_cr
+    cr_lcot = [[] for _ in range(n_cr)]
 
-    n_comps_ps_cr = [[]] * n_cr
-    l_comps_ps_cr = [[]] * n_cr
+    n_comps_ps_cr = [[] for _ in range(n_cr)]
+    l_comps_ps_cr = [[] for _ in range(n_cr)]
     add_supply_comp_list = [False] * n_cr
+    add_supply_comp_list_final = [False] * n_cr
+    inlet_p_result = [[] for _ in range(n_cr)]
 
     # Loop thru compression ratios
     for cr_i, CR_ratio in enumerate(max_CR):
 
         n_comps_ps_cr[cr_i] = [0] * n_ps
-        l_comps_ps_cr[cr_i] = [[]] * n_ps
+        l_comps_ps_cr[cr_i] = [[] for _ in range(n_ps)]
         cr_lcot[cr_i] = [0] * n_ps
 
         m_dot_in_prev = nw.pipe_segments[-1].mdot_out
         # Loop thru segments (in reverse)
         for ps_i, ps in reversed(list(enumerate(nw.pipe_segments))):
+
+            # loop thru inlet pressures
+            supp_p_list = [ps.pressure_ASME_MPa]
+            if ps_i == 0:
+                og_pressure = nw.supply_nodes[
+                    list(nw.supply_nodes.keys())[0]
+                ].pressure_mpa
+
+                if og_pressure < ps.pressure_ASME_MPa:
+                    supp_p_list = (
+                        [og_pressure]
+                        + list(
+                            range(
+                                math.ceil(og_pressure),
+                                math.floor(ps.pressure_ASME_MPa),
+                                1,
+                            )
+                        )
+                        + [ps.pressure_ASME_MPa]
+                    )
+
             pressure_in_MPa = ps.pressure_ASME_MPa
             pressure_in_Pa = pressure_in_MPa * gl.MPA2PA
             pressure_out_MPa = (prev_ASME_pressure / gl.MPA2PA) / CR_ratio
@@ -72,10 +96,12 @@ def additional_compressors(
             pressure_out_Pa = pressure_out_MPa * gl.MPA2PA
             ps_nodes = [x.name for x in ps.nodes]
 
-            comp_cost = [0]
-            revamped_comp_capex = [0]
-            supply_comp_capex = 0
-            supply_comp_fuel = {"gas": 0, "elec": 0}
+            # comp_cost = [0]
+            # revamped_comp_capex = [0]
+            # supply_comp_capex = 0
+            # supply_comp_fuel = {"gas": 0, "elec": 0}
+            in_segment_comp_cost = 0
+            in_segment_comp_revamp_cost = 0
             # Get fuel use of existing compresser in segment (at the end)
             if ps.comps:
                 # Should only be 1 compressor per segment by definition
@@ -90,18 +116,16 @@ def additional_compressors(
                 # Get fuel use
                 # If fuel extraction is off, then set to 0
                 cs_fuel_use[ps_i] = ps_comp.get_fuel_use(m_dot=m_dot_in_prev)
-                comp_cost = [
-                    ps_comp.get_cap_cost(
-                        cp=costing_params, to_electric=design_params.existing_comp_elec
-                    )
-                ]
-                revamped_comp_capex = [
-                    ps_comp.get_cap_cost(
-                        cp=costing_params,
-                        revamp=True,
-                        to_electric=design_params.existing_comp_elec,
-                    )
-                ]
+                in_segment_comp_cost = ps_comp.get_cap_cost(
+                    cp=costing_params, to_electric=design_params.existing_comp_elec
+                )
+
+                in_segment_comp_revamp_cost = ps_comp.get_cap_cost(
+                    cp=costing_params,
+                    revamp=True,
+                    to_electric=design_params.existing_comp_elec,
+                )
+
                 cs_fuel_use_elec[ps_i] = ps_comp.fuel_electric_W
 
             # Calculate all offtakes -- adds the pipe segment outlet as a
@@ -118,119 +142,151 @@ def additional_compressors(
             else:
                 all_mdot[-1] = total_mdot_out
 
-            # Get number of compressors and the lengths
-            (
-                n_comps,
-                l_comps,
-                addl_cs_fuel_ps,
-                addl_cs_elec_ps,
-                m_dot_seg,
-                addl_comps,
-            ) = get_num_compressors(
-                composition=composition,
-                p_in=pressure_in_Pa,
-                p_out=pressure_out_Pa,
-                offtakes=ps.offtake_lengths,
-                offtakes_mdot=all_mdot,
-                HHV=ps.HHV,
-                d=ps.diameter,
-                l_total=ps.length_km,
-                cr_max=CR_ratio,
-                roughness_mm=ps.pipes[0].roughness_mm,
-                eta_s=assign_eta_s,
-                eta_driver=assign_eta_driver,
-                new_comps_elec=design_params.new_comp_elec,
-                eos=nw.eos,
-            )
-            if n_comps == np.inf:
-                segment_lcot = np.inf
-            else:
+            supp_p_min_res = []
+            for sup_p in supp_p_list:
+                comp_cost = [in_segment_comp_cost]
+                revamped_comp_capex = [in_segment_comp_revamp_cost]
+                supply_comp_capex = 0
+                supply_comp_fuel = {"gas": 0, "elec": 0}
 
-                # Get LCOT for segment
-                capacity = sum(all_mdot) * ps.HHV * gl.MW2MMBTUDAY
-                new_pipe_cap = 0
-                fuel_use = (
-                    (cs_fuel_use[ps_i] + sum(addl_cs_fuel_ps)) * ps.HHV * gl.MW2MMBTUDAY
+                # Get number of compressors and the lengths
+                (
+                    n_comps,
+                    l_comps,
+                    addl_cs_fuel_ps,
+                    addl_cs_elec_ps,
+                    m_dot_seg,
+                    addl_comps,
+                ) = get_num_compressors(
+                    composition=composition,
+                    p_in=sup_p * gl.MPA2PA,
+                    p_out=pressure_out_Pa,
+                    offtakes=ps.offtake_lengths,
+                    offtakes_mdot=all_mdot,
+                    HHV=ps.HHV,
+                    d=ps.diameter,
+                    l_total=ps.length_km,
+                    cr_max=CR_ratio,
+                    roughness_mm=ps.pipes[0].roughness_mm,
+                    eta_s=assign_eta_s,
+                    eta_driver=assign_eta_driver,
+                    new_comps_elec=design_params.new_comp_elec,
+                    eos=nw.eos,
+                    thermo_curvefit=nw.thermo_curvefit,
+                    comp_p_out=pressure_in_Pa,
                 )
-                elec_use = (
-                    (cs_fuel_use_elec[ps_i] + sum(addl_cs_elec_ps))
-                    * gl.DAY2HR
-                    / gl.KW2W
-                )
+                if n_comps == np.inf:
+                    segment_lcot = np.inf
+                else:
 
-                for cs in addl_comps.values():
-                    comp_cost.append(cs.get_cap_cost(cp=costing_params))
-
-                # Check if supply compressor needed
-                sn = nw.supply_nodes[list(nw.supply_nodes.keys())[0]]
-                orig_supply_pressure = min(sn.pressure_mpa, ps.pressure_ASME_MPa)
-                if (
-                    sn.node.name in ps_nodes
-                    and orig_supply_pressure < ps.pressure_ASME_MPa
-                ):
-                    add_supply_comp_list[cr_i] = True
-                    from_node = bp_plc.Node(
-                        name="comp_to_node",
-                        X=sn.node.X,
-                        pressure=orig_supply_pressure * gl.MPA2PA,
-                    )
-                    supply_comp = bp_plc.Compressor(
-                        name="new_supply_comp",
-                        from_node=from_node,
-                        to_node=bp_plc.Node(name="comp_to_node", X=sn.node.X),
-                        pressure_out_mpa_g=pressure_in_MPa,
-                        fuel_extract=not design_params.new_comp_elec,
-                    )
-
-                    supply_comp_fuel = {
-                        "gas": supply_comp.get_fuel_use(m_dot=m_dot_seg)
+                    # Get LCOT for segment
+                    capacity = sum(all_mdot) * ps.HHV * gl.MW2MMBTUDAY
+                    new_pipe_cap = 0
+                    fuel_use = (
+                        (cs_fuel_use[ps_i] + sum(addl_cs_fuel_ps))
                         * ps.HHV
                         * gl.MW2MMBTUDAY
-                        / capacity,
-                        "elec": supply_comp.fuel_electric_W
+                    )
+                    elec_use = (
+                        (cs_fuel_use_elec[ps_i] + sum(addl_cs_elec_ps))
                         * gl.DAY2HR
                         / gl.KW2W
-                        / capacity,
-                    }
-
-                    supply_comp_capex += supply_comp.get_cap_cost(cp=costing_params)
-
-                meter_cost = bp_cost.meter_reg_station_cost(
-                    cp=costing_params, demands_MW=demands_MW
-                )
-                # Zero since no pipe is added
-                ili_costs = 0
-                valve_cost = 0
-
-                if sum(comp_cost) == 0 and cs_fuel_use[ps_i] == 0:
-                    segment_lcot = 0
-                else:
-                    price_breakdown = bp_cost.calc_lcot(
-                        json_file=costing_params.casestudy_name,
-                        capacity=capacity,
-                        new_pipe_cap=new_pipe_cap,
-                        comp_cost=comp_cost,
-                        revamped_comp_capex=revamped_comp_capex,
-                        supply_comp_capex=supply_comp_capex,
-                        compressor_fuel=fuel_use / capacity,
-                        compressor_fuel_elec=elec_use / capacity,
-                        supply_comp_fuel=supply_comp_fuel,
-                        cs_cost=costing_params.cf_price,
-                        elec_cost=costing_params.elec_price,
-                        meter_cost=meter_cost,
-                        ili_costs=ili_costs,
-                        valve_cost=valve_cost,
-                        original_network_residual_value=costing_params.original_pipeline_cost,
-                        financial_overrides=costing_params.financial_overrides,
                     )
-                    segment_lcot = price_breakdown["LCOT: Levelized cost of transport"]
 
-            cr_lcot[cr_i][ps_i] = segment_lcot
+                    for cs in addl_comps.values():
+                        comp_cost.append(cs.get_cap_cost(cp=costing_params))
+
+                    # Check if supply compressor needed
+                    sn = nw.supply_nodes[list(nw.supply_nodes.keys())[0]]
+                    orig_supply_pressure = min(sn.pressure_mpa, ps.pressure_ASME_MPa)
+                    if sn.node.name in ps_nodes and orig_supply_pressure < sup_p:
+                        add_supply_comp_list[cr_i] = True
+                        from_node = bp_plc.Node(
+                            name="comp_to_node",
+                            X=sn.node.X,
+                            pressure=orig_supply_pressure * gl.MPA2PA,
+                        )
+                        supply_comp = bp_plc.Compressor(
+                            name="new_supply_comp",
+                            from_node=from_node,
+                            to_node=bp_plc.Node(name="comp_to_node", X=sn.node.X),
+                            pressure_out_mpa_g=sup_p,
+                            fuel_extract=not design_params.new_comp_elec,
+                        )
+
+                        supply_comp_fuel = {
+                            "gas": supply_comp.get_fuel_use(m_dot=m_dot_seg)
+                            * ps.HHV
+                            * gl.MW2MMBTUDAY
+                            / capacity,
+                            "elec": supply_comp.fuel_electric_W
+                            * gl.DAY2HR
+                            / gl.KW2W
+                            / capacity,
+                        }
+
+                        supply_comp_capex += supply_comp.get_cap_cost(cp=costing_params)
+                    else:
+                        add_supply_comp_list[cr_i] = False
+
+                    meter_cost = bp_cost.meter_reg_station_cost(
+                        cp=costing_params, demands_MW=demands_MW
+                    )
+                    # Zero since no pipe is added
+                    ili_costs = 0
+                    valve_cost = 0
+
+                    if (
+                        sum(comp_cost) + supply_comp_capex == 0
+                        and cs_fuel_use[ps_i] == 0
+                    ):
+                        segment_lcot = 0
+                    else:
+                        price_breakdown = bp_cost.calc_lcot(
+                            json_file=costing_params.casestudy_name,
+                            capacity=capacity,
+                            new_pipe_cap=new_pipe_cap,
+                            comp_cost=comp_cost,
+                            revamped_comp_capex=revamped_comp_capex,
+                            supply_comp_capex=supply_comp_capex,
+                            compressor_fuel=fuel_use / capacity,
+                            compressor_fuel_elec=elec_use / capacity,
+                            supply_comp_fuel=supply_comp_fuel,
+                            cs_cost=costing_params.cf_price,
+                            elec_cost=costing_params.elec_price,
+                            meter_cost=meter_cost,
+                            ili_costs=ili_costs,
+                            valve_cost=valve_cost,
+                            original_network_residual_value=costing_params.original_pipeline_cost,
+                            financial_overrides=costing_params.financial_overrides,
+                        )
+                        segment_lcot = price_breakdown[
+                            "LCOT: Levelized cost of transport"
+                        ]
+
+                    supp_p_min_res.append(
+                        (
+                            segment_lcot,
+                            n_comps,
+                            l_comps,
+                            sup_p,
+                            add_supply_comp_list[cr_i],
+                        )
+                    )
+
+            lcot_p_spply = [x[0] for x in supp_p_min_res]
+            idxmin_lcot_p_supp = lcot_p_spply.index(min(lcot_p_spply))
+
+            if ps_i == 0:
+                add_supply_comp_list_final[cr_i] = supp_p_min_res[idxmin_lcot_p_supp][4]
+                inlet_p_result[cr_i] = supp_p_min_res[idxmin_lcot_p_supp][3]
+
+            cr_lcot[cr_i][ps_i] = supp_p_min_res[idxmin_lcot_p_supp][0]
 
             m_dot_in_prev = m_dot_seg
 
-            n_comps_ps_cr[cr_i][ps_i] = n_comps
-            l_comps_ps_cr[cr_i][ps_i] = l_comps
+            n_comps_ps_cr[cr_i][ps_i] = supp_p_min_res[idxmin_lcot_p_supp][1]
+            l_comps_ps_cr[cr_i][ps_i] = supp_p_min_res[idxmin_lcot_p_supp][2]
 
             prev_ASME_pressure = pressure_in_Pa
 
@@ -239,7 +295,8 @@ def additional_compressors(
     cr_min_index = cr_lcot_sums.index(min(cr_lcot_sums))
     n_comps_ps = n_comps_ps_cr[cr_min_index]
     l_comps_ps = l_comps_ps_cr[cr_min_index]
-    add_supply_comp = add_supply_comp_list[cr_min_index]
+    add_supply_comp = add_supply_comp_list_final[cr_min_index]
+    supply_p = inlet_p_result[cr_min_index]
 
     # REMAKE file
     col_names = [
@@ -376,7 +433,9 @@ def additional_compressors(
             comp.eta_comp_s if comp.fuel_extract else comp.eta_comp_s_elec
         )
         new_comps["eta_driver"].append(
-            comp.eta_driver if comp.fuel_extract else comp.eta_driver_elec_used
+            comp.eta_driver
+            if comp.fuel_extract
+            else np.nan  # comp.eta_driver_elec_used
         )
 
         # Assume to_node has to be the outlet pressure
@@ -396,12 +455,12 @@ def additional_compressors(
         new_supply["node_name"].append(supply.node.name)
 
         # Assume to_node has to be the outlet pressure
-        p_max = np.inf
+        # p_max = np.inf
 
-        for pipe in supply.node.connections["Pipe"]:
-            p_max = min(p_max, pipe.pressure_ASME_MPa)
+        # for pipe in supply.node.connections["Pipe"]:
+        #     p_max = min(p_max, pipe.pressure_ASME_MPa)
 
-        new_supply["pressure_mpa_g"].append(p_max)
+        new_supply["pressure_mpa_g"].append(supply_p)
         new_supply["flowrate_MW"].append("")
 
     if add_supply_comp:
@@ -418,7 +477,7 @@ def additional_compressors(
         p_max = np.inf
         for pipe in supply.node.connections["Pipe"]:
             p_max = min(pipe.pressure_ASME_MPa, p_max)
-        new_comps["pressure_out_mpa_g"].insert(0, p_max)
+        new_comps["pressure_out_mpa_g"].insert(0, supply_p)
 
         # Add new node
         new_nodes["node_name"].insert(0, "Supply compressor from_node")
@@ -481,8 +540,10 @@ def make_compressor_network(
     roughness_mm: float,
     eta_s: float,
     eta_driver: float,
+    comp_p_out: float,
     eos: bp_plc.eos._EOS_OPTIONS = "rk",
     new_comps_elec: bool = True,
+    thermo_curvefit: bool = False,
 ) -> tuple:
     """
     Make a new network with compressors added to segment
@@ -574,7 +635,7 @@ def make_compressor_network(
                 name=comp_name,
                 from_node=nodes[name_from],
                 to_node=nodes[name_to],
-                pressure_out_mpa_g=p_in / gl.MPA2PA,
+                pressure_out_mpa_g=comp_p_out / gl.MPA2PA,
                 original_rating_MW=0,
                 fuel_extract=not new_comps_elec,
             )
@@ -597,6 +658,7 @@ def make_compressor_network(
         composition=composition,
     )
     addl_comp_network.set_eos(eos=eos)
+    addl_comp_network.set_thermo_curvefit(thermo_curvefit=thermo_curvefit)
 
     end_node = nodes[f"ot_{node_index-2}"]
     return addl_comp_network, end_node, l_comps, pipes[list(pipes.keys())[0]]
@@ -616,7 +678,9 @@ def get_num_compressors(
     eta_s: float,
     eta_driver: float,
     new_comps_elec: bool,
+    comp_p_out: float,
     eos: bp_plc.eos._EOS_OPTIONS = "rk",
+    thermo_curvefit: bool = False,
 ) -> tuple:
     all_mdot = offtakes_mdot
     if offtakes[-1] == 0:
@@ -655,6 +719,8 @@ def get_num_compressors(
             eta_driver=eta_driver,
             eos=eos,
             new_comps_elec=new_comps_elec,
+            thermo_curvefit=thermo_curvefit,
+            comp_p_out=comp_p_out,
         )
         try:
             addl_comps.solve(relax, cr_max=cr_max)
