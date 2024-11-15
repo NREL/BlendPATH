@@ -23,12 +23,19 @@ def parallel_loop(
     Modify the pipeline with parallel looping
     """
 
+    # Copy the network
     nw = copy.deepcopy(network)
+    # Convert compressors. If not converting to electric, see keep the original choice
     for cs in nw.compressors.values():
         cs.fuel_extract = cs.fuel_extract and not design_params.existing_comp_elec
 
+    # Set compression ratio variables
     max_CR = design_params.max_CR
+    n_cr = len(max_CR)
+    # Set final outlet pressure
     final_outlet_pressure = design_params.final_outlet_pressure_mpa_g
+
+    # For new compressors (supply compressor in PL case)
     assign_eta_s = (
         design_params.new_comp_eta_s_elec
         if design_params.new_comp_elec
@@ -40,8 +47,15 @@ def parallel_loop(
         else design_params.new_comp_eta_driver
     )
 
-    n_cr = len(max_CR)
+    # Copy gas composition
+    composition = nw.composition
+    # Sum up all demands
+    demands_MW = [demand.flowrate_MW for demand in nw.demand_nodes.values()]
 
+    # Save number of pipe segments
+    n_ps = len(nw.pipe_segments)
+
+    # Initialize results. This is per CR and per pipe segment
     res = [
         {
             i: {
@@ -60,34 +74,31 @@ def parallel_loop(
                     "inlet_p",
                 ]
             }
-            for i, x in enumerate(nw.pipe_segments)
+            for i, _ in enumerate(nw.pipe_segments)
         }
-        for y in range(n_cr)
+        for _ in range(n_cr)
     ]
-
-    composition = nw.composition
-    demands_MW = [demand.flowrate_MW for demand in nw.demand_nodes.values()]
-
-    n_ps = len(nw.pipe_segments)
 
     # Loop thru compression ratios
     for cr_i, CR_ratio in enumerate(max_CR):
 
         # Loop thru pipe segments
         prev_ASME_pressure = -1
-        cs_fuel_use = [0] * n_ps
-        cs_fuel_use_elec = [0] * n_ps
         m_dot_in_prev = nw.pipe_segments[-1].mdot_out
         for ps_i, ps in reversed(list(enumerate(nw.pipe_segments))):
+            # Take the next 10 greater than or equal DNs
             dn_options, od_options = ps.get_DNs(10)
 
-            # loop thru inlet pressures
+            # Setup the list to loop thru supply pressures
             supp_p_list = [ps.pressure_ASME_MPa]
+            # Only relevant for first segment
             if ps_i == 0:
                 og_pressure = nw.supply_nodes[
                     list(nw.supply_nodes.keys())[0]
                 ].pressure_mpa
 
+                # This takes integer values between the original
+                # pressure and the MAOP
                 if og_pressure < ps.pressure_ASME_MPa:
                     supp_p_list = (
                         [og_pressure]
@@ -109,39 +120,11 @@ def parallel_loop(
             pressure_out_Pa = pressure_out_MPa * gl.MPA2PA
             l_total = ps.length_km
             ps_nodes = [x.name for x in ps.nodes]
-            # Update fuel use
 
-            comp_cost = [0]
-            revamped_comp_capex = [0]
             supply_comp_capex = 0
             supply_comp_fuel = {"gas": 0, "elec": 0}
-            if ps.comps:
-                # Should only be 1 compressor per segment by definition
-                ps_comp = ps.comps[0]
 
-                # Set the exit pressure of compressor
-                ps_comp.to_node.pressure = (
-                    prev_ASME_pressure if prev_ASME_pressure != -1 else pressure_in_Pa
-                )
-                ps_comp.from_node.pressure = ps_comp.to_node.pressure / CR_ratio
-
-                # Get fuel use
-                # If fuel extraction is off, then set to 0
-                cs_fuel_use[ps_i] = ps_comp.get_fuel_use(m_dot=m_dot_in_prev)
-                comp_cost = [
-                    ps_comp.get_cap_cost(
-                        cp=costing_params, to_electric=design_params.existing_comp_elec
-                    )
-                ]
-                revamped_comp_capex = [
-                    ps_comp.get_cap_cost(
-                        cp=costing_params,
-                        revamp=True,
-                        to_electric=design_params.existing_comp_elec,
-                    )
-                ]
-                cs_fuel_use_elec[ps_i] = ps_comp.fuel_electric_W
-
+            # Loop through pipe steel grades
             for grade in bp_pa.get_pipe_grades():
                 # Speed up calculations: lowest DN is cheapest so skip higher DNs
                 dn_satisfied = False
@@ -164,13 +147,12 @@ def parallel_loop(
                     if schedule is np.nan:
                         continue
 
+                    # Get inner and outer diameters
                     d_outer_mm = od_options[dn_i]
                     d_inner_mm = d_outer_mm - 2 * th
 
                     # Calculate all offtakes -- adds the pipe segment outlet as a
                     # offtake if it is not already
-                    total_mdot_out = m_dot_in_prev + cs_fuel_use[ps_i]
-
                     all_mdot = ps.offtake_mdots.copy()
                     if (
                         len(ps.offtake_mdots) == 0
@@ -178,19 +160,19 @@ def parallel_loop(
                         / ps.offtake_mdots[-1]
                         > 0.01
                     ):
-                        all_mdot.append(total_mdot_out)
+                        all_mdot.append(m_dot_in_prev)
                     else:
-                        all_mdot[-1] = total_mdot_out
+                        all_mdot[-1] = m_dot_in_prev
 
+                    # Loop through supply pressures
                     supp_p_min_res = []
                     for sup_p in supp_p_list:
 
-                        loop_length, m_dot_seg = get_loop_length(
+                        loop_length, m_dot_seg, comp_out = get_loop_length(
                             composition=composition,
                             d_main=ps.diameter,
                             d_loop=d_inner_mm,
                             l_total=l_total,
-                            HHV=ps.HHV,
                             p_in=sup_p,
                             p_out_target=pressure_out_Pa,
                             offtakes=ps.offtake_lengths,
@@ -198,12 +180,17 @@ def parallel_loop(
                             roughness_mm=ps.pipes[0].roughness_mm,
                             eos=nw.eos,
                             thermo_curvefit=nw.thermo_curvefit,
+                            seg_compressor=ps.comps,
+                            costing_params=costing_params,
+                            design_params=design_params,
+                            prev_ASME_pressure=prev_ASME_pressure,
                         )
 
                         if np.isnan(loop_length):
                             continue
                         dn_satisfied = True
 
+                        # Get material cost
                         loop_cost = bp_cost.get_pipe_material_cost(
                             cp=costing_params,
                             di_mm=d_inner_mm,
@@ -212,8 +199,7 @@ def parallel_loop(
                             grade=grade,
                         )
 
-                        # Check LCOT for segment
-                        segment_lcot = 0
+                        # Get other pipe costs
                         new_pipe_cap = 0
                         if loop_length > 0:
                             anl_cap = bp_cost.get_pipe_other_cost(
@@ -224,9 +210,11 @@ def parallel_loop(
                             )
                             anl_cap_sum = sum(anl_cap.values())
                             new_pipe_cap = anl_cap_sum + loop_cost
+
+                        # Unit change for segment capacity and compressor fuel
                         capacity = sum(all_mdot) * ps.HHV * gl.MW2MMBTUDAY
-                        fuel_use = cs_fuel_use[ps_i] * ps.HHV * gl.MW2MMBTUDAY
-                        elec_use = cs_fuel_use_elec[ps_i] * gl.DAY2HR / gl.KW2W
+                        fuel_use = comp_out["fuel"] * ps.HHV * gl.MW2MMBTUDAY
+                        elec_use = comp_out["elec"] * gl.DAY2HR / gl.KW2W
 
                         # Check if supply compressor needed
                         sn = nw.supply_nodes[list(nw.supply_nodes.keys())[0]]
@@ -264,8 +252,6 @@ def parallel_loop(
                             )
 
                         # Get meter,ILI,valve costs
-                        # Get all demands
-
                         meter_cost = bp_cost.meter_reg_station_cost(
                             cp=costing_params, demands_MW=demands_MW
                         )
@@ -282,8 +268,8 @@ def parallel_loop(
                             json_file=costing_params.casestudy_name,
                             capacity=capacity,
                             new_pipe_cap=new_pipe_cap,
-                            comp_cost=comp_cost,
-                            revamped_comp_capex=revamped_comp_capex,
+                            comp_cost=[comp_out["cost"]],
+                            revamped_comp_capex=[comp_out["revamp"]],
                             supply_comp_capex=supply_comp_capex,
                             compressor_fuel=fuel_use / capacity,
                             compressor_fuel_elec=elec_use / capacity,
@@ -300,6 +286,7 @@ def parallel_loop(
                             "LCOT: Levelized cost of transport"
                         ]
 
+                        # Add as an entry to determine best supply pressure
                         supp_p_min_res.append(
                             (
                                 segment_lcot,
@@ -310,11 +297,13 @@ def parallel_loop(
                             )
                         )
 
+                    # Choose best supply pressure
                     if not supp_p_min_res:
                         continue
                     lcot_p_spply = [x[0] for x in supp_p_min_res]
                     idxmin_lcot_p_supp = lcot_p_spply.index(min(lcot_p_spply))
 
+                    # Add to results
                     res[cr_i][ps_i]["costs"].append(
                         supp_p_min_res[idxmin_lcot_p_supp][0]
                     )
@@ -338,11 +327,12 @@ def parallel_loop(
                     )
 
             # Update the previous segment pressure for use in fuel extraction calc
-            # m_dot_seg isnt changing with grade and diameter
+            # m_dot_seg isnt changing with grade and diameter, since pipe is
+            # rated to original pipe MAOP
             prev_ASME_pressure = pressure_in_Pa
             m_dot_in_prev = m_dot_seg
 
-    # Choose best solution based on CR solutions
+    # Choose lowest LCOT solution based on for each CR
     cr_lcot_sum = [0] * n_cr
     for cr_i in range(n_cr):
         cr_lcot_sum[cr_i] = sum(
@@ -614,17 +604,17 @@ def parallel_loop(
             continue
         # Combine by DN,sch,grade
         combined_ind = f"{i['DN']};;{i['schedules']};;{i['grades']}"
-        if combined_ind in combined_pipe["D_S_G"]:
-            dsg_ind = combined_pipe["D_S_G"].index(combined_ind)
-            combined_pipe["length"][dsg_ind] += i["loop_length"]
-            combined_pipe["mat_cost"][dsg_ind] += i["mat_costs"]
-        else:
-            combined_pipe["DN"].append(i["DN"])
-            combined_pipe["sch"].append(i["schedules"])
-            combined_pipe["grade"].append(i["grades"])
-            combined_pipe["D_S_G"].append(combined_ind)
-            combined_pipe["length"].append(i["loop_length"])
-            combined_pipe["mat_cost"].append(i["mat_costs"])
+        # if combined_ind in combined_pipe["D_S_G"]:
+        #     dsg_ind = combined_pipe["D_S_G"].index(combined_ind)
+        #     combined_pipe["length"][dsg_ind] += i["loop_length"]
+        #     combined_pipe["mat_cost"][dsg_ind] += i["mat_costs"]
+        # else:
+        combined_pipe["DN"].append(i["DN"])
+        combined_pipe["sch"].append(i["schedules"])
+        combined_pipe["grade"].append(i["grades"])
+        combined_pipe["D_S_G"].append(combined_ind)
+        combined_pipe["length"].append(i["loop_length"])
+        combined_pipe["mat_cost"].append(i["mat_costs"])
 
     return new_pipes_f, combined_pipe
 
@@ -635,10 +625,12 @@ def make_loop_network(
     p_in: float,
     offtakes: list,
     all_mdot: list,
-    HHV: float,
     d_main: float,
     d_loop: float,
     roughness_mm: float,
+    seg_compressor: list,
+    prev_ASME_pressure: float,
+    comps_elec: bool,
     eos: bp_plc.eos._EOS_OPTIONS = "rk",
     thermo_curvefit: bool = False,
 ) -> tuple:
@@ -652,6 +644,9 @@ def make_loop_network(
     pipes = {}
     demands = {}
     supplys = {"supply": bp_plc.Supply_node(node=n_ds_in, pressure_mpa=p_in)}
+    compressors = {}
+
+    HHV = composition.HHV
 
     # Loop through offtakes
     cumsum_offtakes = np.insert(np.cumsum(offtakes), 0, 0)
@@ -732,18 +727,48 @@ def make_loop_network(
 
     end_node = nodes[name]
 
+    # If a compressor exists in the segment
+    if seg_compressor:
+        comp_orig = seg_compressor[0]
+        comp_name = "segment_compressor"
+
+        # Keep the final node as is for pipe connections as is, but then add another node after.
+        # Compressor will compress to this node. Demand node will be updated
+
+        # Add node after compressor
+        final_node_name = "final_node"
+        nodes[final_node_name] = bp_plc.Node(name=final_node_name, X=composition)
+        # Update demand to be the final node
+
+        final_demand_node_name = f"demand_{len(all_mdot)-1}"
+        prev_final_node = demands[final_demand_node_name].node
+        demands[final_demand_node_name].node = nodes[final_node_name]
+        # Add the compressor
+        compressors[comp_name] = bp_plc.Compressor(
+            name=comp_name,
+            from_node=prev_final_node,
+            to_node=nodes[final_node_name],
+            pressure_out_mpa_g=prev_ASME_pressure / gl.MPA2PA,
+            original_rating_MW=comp_orig.original_rating_MW,
+            fuel_extract=not comps_elec,
+        )
+        compressors[comp_name].eta_comp_s = comp_orig.eta_comp_s
+        compressors[comp_name].eta_comp_s_elec = comp_orig.eta_comp_s_elec
+        compressors[comp_name].eta_driver = comp_orig.eta_driver
+        compressors[comp_name].eta_driver_elec = comp_orig.eta_driver_elec
+
     looping = BlendPATH_network(
         name="looping",
         pipes=pipes,
         nodes=nodes,
         demand_nodes=demands,
         supply_nodes=supplys,
-        compressors={},
+        compressors=compressors,
         composition=composition,
     )
     looping.set_eos(eos=eos)
     looping.set_thermo_curvefit(thermo_curvefit)
-    return looping, end_node, n_ds_in.connections["Pipe"]
+    return looping, end_node, n_ds_in.connections["Pipe"], compressors
 
 
 def get_loop_length(
@@ -751,12 +776,15 @@ def get_loop_length(
     d_main: float,
     d_loop: float,
     l_total: float,
-    HHV: float,
     p_in: float,
     p_out_target: float,
     offtakes: list,
     offtakes_mdot: list,
     roughness_mm: float,
+    seg_compressor: list,
+    costing_params: bp_cost.Costing_params,
+    design_params: Design_params,
+    prev_ASME_pressure: float,
     eos: bp_plc.eos._EOS_OPTIONS = "rk",
     thermo_curvefit: bool = False,
 ) -> tuple:
@@ -770,20 +798,24 @@ def get_loop_length(
 
     all_mdot = offtakes_mdot
 
+    comps_elec = design_params.existing_comp_elec
+
     # Test boundary conditions first
     for l_loop in l_bounds:
-        looping, end_node, end_pipes = make_loop_network(
+        looping, end_node, end_pipes, compressors = make_loop_network(
             l_loop=l_loop,
             composition=composition,
             p_in=p_in,
             offtakes=offtakes,
             all_mdot=all_mdot,
-            HHV=HHV,
             d_main=d_main,
             d_loop=d_loop,
             roughness_mm=roughness_mm,
             eos=eos,
             thermo_curvefit=thermo_curvefit,
+            seg_compressor=seg_compressor,
+            comps_elec=comps_elec,
+            prev_ASME_pressure=prev_ASME_pressure,
         )
         try:
             looping.solve()
@@ -795,17 +827,23 @@ def get_loop_length(
                 # less looping will only make it more negative (higher pressure drop)
                 # Thus this diameter/grade is not valid
                 if l_loop == l_total:
-                    return returning_loop_length(np.nan, end_pipes)
+                    return returning_loop_length(
+                        np.nan, end_pipes, 0, costing_params, design_params
+                    )
             continue
         p_vals.append(end_node.pressure)
         l_vals.append(l_loop)
         # If 0 looping, and outlet pressure is greater than target, then no looping is the cheapest option
         if end_node.pressure > p_out_target and l_loop == 0:
-            return returning_loop_length(0, end_pipes)
+            return returning_loop_length(
+                0, end_pipes, compressors, costing_params, design_params
+            )
         # If end pressure is less than target at 100% looping, then this combo is not a solution, since even with
         # 100% looping, there is too much pressure drop
         if end_node.pressure < p_out_target and l_loop == l_total:
-            return returning_loop_length(np.nan, end_pipes)
+            return returning_loop_length(
+                np.nan, end_pipes, 0, costing_params, design_params
+            )
 
     iter = 0
     err = np.inf
@@ -828,27 +866,35 @@ def get_loop_length(
 
         # If it is close to the full loop just return full loop
         if abs(l_loop - l_total) < gl.PL_LEN_TOL:
-            return returning_loop_length(l_total, end_pipes)
-        # If it is close to zero loop, then return 0 loop length
+            return returning_loop_length(
+                l_total, end_pipes, compressors, costing_params, design_params
+            )
+        # If it is close to zero loop and 0 wasn't a solution, then not a solution
         if abs(l_loop) < gl.PL_LEN_TOL:
-            return returning_loop_length(np.nan, end_pipes)
+            return returning_loop_length(
+                np.nan, end_pipes, 0, costing_params, design_params
+            )
 
         # If the bounds are too close then break out
         if len(l_vals) > 1 and abs(l_vals[-1] - l_vals[-2]) < gl.PL_LEN_TOL:
-            return returning_loop_length(l_loop, end_pipes)
+            return returning_loop_length(
+                l_loop, end_pipes, compressors, costing_params, design_params
+            )
 
-        looping, end_node, end_pipes = make_loop_network(
+        looping, end_node, end_pipes, compressors = make_loop_network(
             l_loop=l_loop,
             composition=composition,
             p_in=p_in,
             offtakes=offtakes,
             all_mdot=all_mdot,
-            HHV=HHV,
             d_main=d_main,
             d_loop=d_loop,
             roughness_mm=roughness_mm,
             eos=eos,
             thermo_curvefit=thermo_curvefit,
+            seg_compressor=seg_compressor,
+            comps_elec=comps_elec,
+            prev_ASME_pressure=prev_ASME_pressure,
         )
 
         # If negative pressure, solve will provide a Value error
@@ -878,13 +924,43 @@ def get_loop_length(
             raise ValueError(f"Solver could not solve in {gl.MAX_ITER} iterations")
         iter += 1
 
-    return returning_loop_length(l_loop, end_pipes)
+    return returning_loop_length(
+        l_loop, end_pipes, compressors, costing_params, design_params
+    )
 
 
-def returning_loop_length(length: float, end_pipes: dict) -> tuple:
+def returning_loop_length(
+    length: float,
+    end_pipes: dict,
+    compressors: dict,
+    costing_params: bp_cost.Costing_params,
+    design_params: Design_params,
+) -> tuple:
     """
     Return the length and mdot of the segment
     """
     # Added this function to sum up the m_dot in to the segment in one place
     mdot = sum([pipe.m_dot for pipe in end_pipes])
-    return length, mdot
+
+    comp_out = {"fuel": 0, "cost": 0, "revamp": 0, "elec": 0}
+    if compressors:
+        comp = compressors["segment_compressor"]
+        fuel_use = comp.fuel_mdot
+        comp_cost = comp.get_cap_cost(
+            cp=costing_params, to_electric=design_params.existing_comp_elec
+        )
+
+        revamped_comp_capex = comp.get_cap_cost(
+            cp=costing_params,
+            revamp=True,
+            to_electric=design_params.existing_comp_elec,
+        )
+        fuel_use_elec = comp.fuel_electric_W
+        comp_out = {
+            "fuel": fuel_use,
+            "cost": comp_cost,
+            "revamp": revamped_comp_capex,
+            "elec": fuel_use_elec,
+        }
+
+    return length, mdot, comp_out

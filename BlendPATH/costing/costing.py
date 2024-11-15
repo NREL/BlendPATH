@@ -697,7 +697,7 @@ def valve_replacement_cost_file(file: str) -> dict:
         for row in reader:
             if row["Install type"] == "Buried":
                 buried[int(row["DN"])] = int(row["Installed valve cost [2020$]"])
-            elif row["Install type"] == "Above ground, bolted":
+            elif row["Install type"] == "Above ground, welded":
                 above[int(row["DN"])] = int(row["Installed valve cost [2020$]"])
     return {"buried": buried, "above": above}
 
@@ -723,8 +723,8 @@ def valve_replacement_cost(
         )
     spacing = ASMEB3112_valve_spacing[loc_class]
 
-    if v_type not in ["buried", "above"]:
-        raise ValueError(f"Valve type must be 'buried' or 'above', {v_type} was given")
+    if v_type not in ["buried"]:
+        raise ValueError(f"Valve type must be 'buried', {v_type} was given")
     ref_data = cp.valve_cost[v_type]
 
     valve_cost = sum(
