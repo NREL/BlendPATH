@@ -4,9 +4,8 @@ import cantera as ct
 
 import BlendPATH.Global as gl
 
-from . import Composition, Compressor, Pipe
+from . import Composition, Compressor, Pipe, eos
 from . import cantera_util as ctu
-from . import eos
 
 
 @dataclass

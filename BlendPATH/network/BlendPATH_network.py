@@ -498,9 +498,13 @@ class BlendPATH_network:
             for comp in self.compressors.values():
                 to_c = comp.to_node.index
                 from_c = comp.from_node.index
-                m_dot_target[from_c] = -1 * nodal_flow[to_c]
+                comp_flow = -1 * nodal_flow[to_c]
+                if to_c == n_nodes - 1:
+                    # If there is a compressor at the end of the segment
+                    comp_flow = m_dot_sum
+                m_dot_target[from_c] = comp_flow
                 # If using fuel extraction, then reduce mdot after comp
-                fuel_use = comp.get_fuel_use(-1 * nodal_flow[to_c])
+                fuel_use = comp.get_fuel_use(comp_flow)
                 if not comp.fuel_extract:
                     continue
                 m_dot_target[from_c] += fuel_use
