@@ -363,7 +363,11 @@ def calc_lcot(
 
     sol = pf.solve_price()
 
-    price_breakdown = pf.get_cost_breakdown()
+    price_breakdown = pf.get_cost_breakdown(sorted=False)
+    price_breakdown_dict = dict(
+        zip(price_breakdown["Name"].values, price_breakdown["NPV"].values)
+    )
+
     add_lcot_str = [f"LCOT: {x}" for x in col_names.values()]
     prices_all = {
         x: 0
@@ -374,43 +378,43 @@ def calc_lcot(
 
     prices_all["LCOT: Levelized cost of transport"] = sol["lco"]
     prices_all[f"LCOT: {col_names['fuel']}"] = price_breakdown_cols(
-        price_breakdown, [col_names["fuel"]], []
+        price_breakdown_dict, [col_names["fuel"]], []
     )
     prices_all[f"LCOT: {col_names['fuel_elec']}"] = price_breakdown_cols(
-        price_breakdown, [col_names["fuel_elec"]], []
+        price_breakdown_dict, [col_names["fuel_elec"]], []
     )
     prices_all[f"LCOT: {col_names['supply_fuel_gas']}"] = price_breakdown_cols(
-        price_breakdown, [col_names["supply_fuel_gas"]], []
+        price_breakdown_dict, [col_names["supply_fuel_gas"]], []
     )
     prices_all[f"LCOT: {col_names['supply_fuel_elec']}"] = price_breakdown_cols(
-        price_breakdown, [col_names["supply_fuel_elec"]], []
+        price_breakdown_dict, [col_names["supply_fuel_elec"]], []
     )
 
     # Get financial expense associated with equipment
     pos = ["Repayment of debt", "Interest expense", "Dividends paid"]
     neg = ["Inflow of debt", "Inflow of equity"]
-    cap_expense = price_breakdown_cols(price_breakdown, pos, neg)
+    cap_expense = price_breakdown_cols(price_breakdown_dict, pos, neg)
 
     # Get remaining financial expenses
     pos = ["Non-depreciable assets", "Cash on hand reserve"]
     neg = ["Sale of non-depreciable assets", "Cash on hand recovery"]
-    prices_all["LCOT: Financial"] = price_breakdown_cols(price_breakdown, pos, neg)
+    prices_all["LCOT: Financial"] = price_breakdown_cols(price_breakdown_dict, pos, neg)
 
     # Get tax related
     pos = ["Income taxes payable", "Capital gains taxes payable"]
     neg = ["Monetized tax losses"]
-    prices_all["LCOT: Taxes"] = price_breakdown_cols(price_breakdown, pos, neg)
+    prices_all["LCOT: Taxes"] = price_breakdown_cols(price_breakdown_dict, pos, neg)
 
     # Get fixed O&M
     pos = ["Administrative expenses", "Property insurance"]
     neg = []
-    prices_all["LCOT: Fixed O&M"] = price_breakdown_cols(price_breakdown, pos, neg)
+    prices_all["LCOT: Fixed O&M"] = price_breakdown_cols(price_breakdown_dict, pos, neg)
 
     # Get inline inspection
     pos = [col_names["ili"]]
     neg = []
     prices_all["LCOT: In-line inspection"] = price_breakdown_cols(
-        price_breakdown, pos, neg
+        price_breakdown_dict, pos, neg
     )
 
     total_capex = {
@@ -431,7 +435,8 @@ def calc_lcot(
     # Get CAPEX and distribute related financial expenses
     for i in total_capex.keys():
         prices_all[f"LCOT: {i}"] = (
-            price_breakdown_cols(price_breakdown, [i]) + cap_expense * capex_fraction[i]
+            price_breakdown_cols(price_breakdown_dict, [i])
+            + cap_expense * capex_fraction[i]
         )
 
     return prices_all
@@ -450,12 +455,12 @@ def get_cs_fuel_cost(
     """
 
     # Get pure H2 HHV,GCV
-    pure_h2 = bp_plc.Composition({"H2": 1})
+    pure_h2 = bp_plc.Composition({"H2": 1}, interp=False)
     H2_energy_HHV = pure_h2.HHV  # MJ/kg
     GCV_H2_MJpsm3 = pure_h2.get_GCV()
 
     # Get pure CH4 GCV
-    pure_ch4 = bp_plc.Composition(ng_comp)
+    pure_ch4 = bp_plc.Composition(ng_comp, interp=False)
     GCV_NG_MJpsm3 = pure_ch4.get_GCV()
 
     blend_ratio_energy = (blend * GCV_H2_MJpsm3) / (
@@ -571,10 +576,8 @@ def price_breakdown_cols(df: pd.DataFrame, pos: list = None, neg: list = None) -
         pos = []
     if neg is None:
         neg = []
-    return (
-        df.loc[df["Name"].isin(pos), "NPV"].sum()
-        - df.loc[df["Name"].isin(neg), "NPV"].sum()
-    )
+
+    return sum([df[x] for x in pos]) - sum([df[x] for x in neg])
 
 
 def meter_reg_station_cost(cp: Costing_params, demands_MW: list) -> float:

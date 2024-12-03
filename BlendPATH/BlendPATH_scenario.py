@@ -66,7 +66,7 @@ class BlendPATH_scenario:
             "compressor_markup": 1,
             "financial_overrides": {},
             "filename_suffix": "",
-            "thermo_curvefit": False,
+            "thermo_curvefit": True,
         }
         self.read_inputs(temp_inputs)
 
@@ -373,7 +373,9 @@ class BlendPATH_scenario:
         iters = 0
         while iters < 5:
             try:
-                new_network.solve(c_relax=gl.RELAX_FACTOR * 1.05**iters)
+                new_network.solve(
+                    c_relax=gl.RELAX_FACTOR * 1.1**iters, low_p_buffer=0.01
+                )
                 break
             except (ValueError, ct.CanteraError):
                 iters += 1
@@ -474,6 +476,7 @@ class BlendPATH_scenario:
 
         # Run financial analysis to get LCOT
         price_breakdown = self.run_financial(
+            capacity=new_network.capacity_MMBTU_day,
             new_pipe_cap=new_pipe_cap,
             comp_cost=comp_capex,
             revamped_comp_capex=revamped_comp_capex,
@@ -515,6 +518,7 @@ class BlendPATH_scenario:
 
     def run_financial(
         self,
+        capacity: float,
         new_pipe_cap: float,
         comp_cost: list,
         revamped_comp_capex: list,
@@ -533,9 +537,6 @@ class BlendPATH_scenario:
         """
         Setup parameters to run LCOT calculation
         """
-
-        # Use summation all of demands for capacity
-        capacity = self.network.capacity_MMBTU_day
 
         # Get fuel usage rate
         all_fuel_usage = all_fuel_MW * gl.MW2MMBTUDAY / capacity  # MMBTU/MMBTU
@@ -767,9 +768,9 @@ class BlendPATH_scenario:
         # params_out.append(("Original network residual value", 0, "$"))
 
         # Get energy ratio of H2
-        pure_h2 = bp_plc.Composition({"H2": 1})
+        pure_h2 = bp_plc.Composition({"H2": 1}, interp=False)
         GCV_H2_MJpsm3 = pure_h2.get_GCV()
-        pure_ch4 = bp_plc.Composition(self.network.composition.pure_x)
+        pure_ch4 = bp_plc.Composition(self.network.composition.pure_x, interp=False)
         GCV_NG_MJpsm3 = pure_ch4.get_GCV()
 
         blend_ratio_energy = (self.blend * GCV_H2_MJpsm3) / (
@@ -925,9 +926,8 @@ class BlendPATH_scenario:
             # Get new/existing
             new_old = "Existing"
             maop = pipe.p_max_mpa_g
-            if (
-                self.mod_type in ["pl"]
-                and pipe.name == all_new_pipes[f"pipe_segment_{segment}"]["name"]
+            if self.mod_type in ["pl"] and pipe.name.startswith(
+                all_new_pipes[f"pipe_segment_{segment}"]["name"]
             ):
                 new_old = "New"
                 maop = all_new_pipes[f"pipe_segment_{segment}"]["pressures"]

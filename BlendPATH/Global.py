@@ -23,9 +23,12 @@ MW2MMBTUDAY = MJ2MMBTU * 24 * 3_600
 
 # Solver constants
 RELAX_FACTOR = 1.5
-MAX_ITER = 400
+MAX_ITER = 1000
 SOLVER_TOL = 1e-3
 MIN_PRES = 20 * BAR2PA
 
 # Parallel loop solver
 PL_LEN_TOL = 0.01
+
+# Max segment L/D
+SEG_MAX = 27_500

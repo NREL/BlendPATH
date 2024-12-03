@@ -103,27 +103,40 @@ class Pipe:
         )
         return pressure_ASME_MPa
 
-    def get_derivative(self, eos_type: eos._EOS_OPTIONS) -> tuple:
+    def get_derivative(self, coef: float, p_eqn: float) -> float:
         """
         Calculate the derivative dm/dp for the solver
         """
-        p_in = self.from_node.pressure
-        p_out = self.to_node.pressure
-        C_p_eqn = self.get_flow_eqn_const(derivative=True, eos_type=eos_type)
+        if p_eqn == 0:
+            return np.inf
+        return coef * p_eqn**-0.5
 
-        return C_p_eqn, p_in, p_out
-
-    def get_mdot(self, eos_type: eos._EOS_OPTIONS) -> float:
+    def get_mdot(self, coef: float, p_eqn: float) -> float:
         """
         Get the mass flow rate through the pipe
         """
-        C_p_eqn = self.get_flow_eqn_const(derivative=False, eos_type=eos_type)
+        C_p_eqn = coef * p_eqn**0.5
         direction = self.get_direction()
         self.m_dot = C_p_eqn * direction
-        return C_p_eqn * direction
+        return self.m_dot
+
+    def get_d_and_mdot(
+        self, rho_avg: float, z_avg: float, mu: float, eos_type: eos._EOS_OPTIONS
+    ) -> tuple:
+
+        # Call flow eqn
+        coef, p_eqn = self.get_flow_eqn_const(rho_avg, z_avg, mu, eos_type=eos_type)
+
+        # get derivative term
+        C_p_eqn_deriv = self.get_derivative(coef=coef, p_eqn=p_eqn)
+
+        # Get mass flow rate
+        mdot = self.get_mdot(coef=coef, p_eqn=p_eqn)
+
+        return C_p_eqn_deriv, mdot
 
     def get_flow_eqn_const(
-        self, derivative: bool = True, eos_type: eos._EOS_OPTIONS = "rk"
+        self, rho_avg: float, z_avg: float, mu: float, eos_type: eos._EOS_OPTIONS = "rk"
     ) -> float:
         """
         Calculate momentum equation coefficient
@@ -137,12 +150,12 @@ class Pipe:
         D = self.diameter_mm * gl.MM2M
         L = self.length_km * gl.KM2M
 
-        p_avg = 2 / 3 * (p_in + p_out - p_in * p_out / (p_in + p_out)) - ct.one_atm
-
         if self.thermo_curvefit:
-            rho_avg, z_avg = self.from_node.X.get_curvefit_rho_z(p_gauge_pa=p_avg)
-            mu = self.from_node.X.get_curvefit_mu(p_gauge_pa=p_avg)
+            # rho_avg, z_avg = self.from_node.X.get_curvefit_rho_z(p_gauge_pa=p_avg)
+            pass
+            # mu = self.from_node.X.get_curvefit_mu(p_gauge_pa=p_avg)
         else:
+            p_avg = self.get_p_avg()
             ctu.gas.TPX = T, p_avg + ct.one_atm, self.from_node.X.x_str
             mu = ctu.gas.viscosity
             rho_avg, z_avg = eos.get_rz(
@@ -150,23 +163,26 @@ class Pipe:
             )
 
         if self.m_dot is None:
-            Re = 1e8
+            self.Re = 1e8
         else:
             v_avg = abs(self.m_dot / rho_avg / self.A_m2)
-            Re = rho_avg * v_avg * D / mu
+            self.Re = rho_avg * v_avg * D / mu
             self.v_avg = v_avg
             self.v_from = abs(self.m_dot / self.from_node.rho / self.A_m2)
             self.v_to = abs(self.m_dot / self.to_node.rho / self.A_m2)
-        self.Re = Re
 
-        f = self.get_friction_factor(Re, self.roughness_mm, self.diameter_mm)
-        self.f = f
+        self.f = self.get_friction_factor(self.Re, self.roughness_mm, self.diameter_mm)
 
-        coef = A * (mw / z_avg / ctu.R_GAS / T * D / f / L) ** (0.5)
+        coef = A * (mw / z_avg / ctu.R_GAS / T * D / self.f / L) ** (0.5)
 
-        p_eqn = abs(p_in**2 - p_out**2) ** (0.5 * (-1 if derivative else 1))
+        p_eqn = abs(p_in**2 - p_out**2)
 
-        return coef * p_eqn
+        return coef, p_eqn
+
+    def get_p_avg(self) -> float:
+        p_in = self.from_node.pressure + ct.one_atm
+        p_out = self.to_node.pressure + ct.one_atm
+        return 2 / 3 * (p_in + p_out - p_in * p_out / (p_in + p_out)) - ct.one_atm
 
     def get_friction_factor(self, Re: float, RO: float, D: float) -> float:
         """

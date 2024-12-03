@@ -7,9 +7,9 @@ The BlendPATH repository can by cloned to your local computer using:
 `git clone https://github.com/NREL/BlendPATH.git`
 
 ## Create environment
-A conda environoment can useful for satisfying the Python requirement. First, open an anaconda powershell. Within the powershell, we will first create a conda environment to install BlendPATH in. This command below creates a conda environment called `BlendPATH_env`. The second argument is the Python version. We default to 3.8.19 for compatibility with Cantera for some Mac OSX users. However, more experienced users may relax this constraint in the [configuration file](pyproject.toml) Note: you may swap `BlendPATH_env` with whatever you would like to name the environment
+A conda environoment can useful for satisfying the Python requirement. First, open an anaconda powershell. Within the powershell, we will first create a conda environment to install BlendPATH in. This command below creates a conda environment called `BlendPATH_env`. The second argument is the Python version. The BlendPATH team recommends Python 3.10 or 3.11.  Note: you may swap `BlendPATH_env` with whatever you would like to name the environment
 
-`conda create -n BlendPATH_env python=3.8.19`
+`conda create -n BlendPATH_env python=3.10`
 
 Within the same powershell, enter into the conda environment using
 
