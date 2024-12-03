@@ -127,3 +127,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Sphinx doc generation
+docs
+make.bat
+Makefile

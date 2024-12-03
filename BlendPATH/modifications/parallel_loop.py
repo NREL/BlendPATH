@@ -72,6 +72,8 @@ def parallel_loop(
                     "loop_length",
                     "add_supply_comp",
                     "inlet_p",
+                    "m_dot_in",
+                    "p_out",
                 ]
             }
             for i, _ in enumerate(nw.pipe_segments)
@@ -87,7 +89,7 @@ def parallel_loop(
         m_dot_in_prev = nw.pipe_segments[-1].mdot_out
         for ps_i, ps in reversed(list(enumerate(nw.pipe_segments))):
             # Take the next 10 greater than or equal DNs
-            dn_options, od_options = ps.get_DNs(10)
+            dn_options, od_options = ps.get_DNs(15)
 
             # Setup the list to loop thru supply pressures
             supp_p_list = [ps.pressure_ASME_MPa]
@@ -168,7 +170,7 @@ def parallel_loop(
                     supp_p_min_res = []
                     for sup_p in supp_p_list:
 
-                        loop_length, m_dot_seg, comp_out = get_loop_length(
+                        loop_length, m_dot_seg, comp_out, p_out = get_loop_length(
                             composition=composition,
                             d_main=ps.diameter,
                             d_loop=d_inner_mm,
@@ -236,8 +238,19 @@ def parallel_loop(
                                 pressure_out_mpa_g=pressure,
                                 fuel_extract=not design_params.new_comp_elec,
                             )
+                            comp_h_1 = sn.node.X.get_curvefit_h(
+                                supply_comp.from_node.pressure
+                            )
+                            comp_s_1 = sn.node.X.get_curvefit_s(
+                                supply_comp.from_node.pressure
+                            )
+                            comp_h_2_s = sn.node.X.get_curvefit_h_2d(
+                                supply_comp.to_node.pressure, comp_s_1
+                            )
                             supply_comp_fuel = {
-                                "gas": supply_comp.get_fuel_use(m_dot=m_dot_seg)
+                                "gas": supply_comp.get_fuel_use(
+                                    comp_h_1, comp_s_1, comp_h_2_s, m_dot=m_dot_seg
+                                )
                                 * ps.HHV
                                 * gl.MW2MMBTUDAY
                                 / capacity,
@@ -255,12 +268,28 @@ def parallel_loop(
                         meter_cost = bp_cost.meter_reg_station_cost(
                             cp=costing_params, demands_MW=demands_MW
                         )
+
+                        all_pipes_len = []
+                        pipe_dns_lens = {}
+                        for pipe in ps.pipes:
+                            if pipe.DN in pipe_dns_lens.keys():
+                                pipe_dns_lens[pipe.DN] += pipe.length_km
+                            else:
+                                pipe_dns_lens[pipe.DN] = pipe.length_km
+                        if dn in pipe_dns_lens.keys():
+                            pipe_dns_lens[dn] += loop_length
+                        else:
+                            pipe_dns_lens[dn] = loop_length
+                        all_pipes_len = [
+                            (dn, length) for dn, length in pipe_dns_lens.items()
+                        ]
+
                         ili_costs = bp_cost.ili_cost(
-                            cp=costing_params, pipe_added=[(dn, loop_length)]
+                            cp=costing_params, pipe_added=all_pipes_len
                         )
                         valve_cost = bp_cost.valve_replacement_cost(
                             costing_params,
-                            [(dn, loop_length)],
+                            all_pipes_len,
                             ASME_params.location_class,
                         )
 
@@ -294,6 +323,8 @@ def parallel_loop(
                                 loop_length,
                                 add_supply_comp,
                                 sup_p,
+                                m_dot_seg,
+                                p_out,
                             )
                         )
 
@@ -325,12 +356,23 @@ def parallel_loop(
                     res[cr_i][ps_i]["inlet_p"].append(
                         supp_p_min_res[idxmin_lcot_p_supp][4]
                     )
+                    res[cr_i][ps_i]["m_dot_in"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][5]
+                    )
+                    res[cr_i][ps_i]["p_out"].append(
+                        supp_p_min_res[idxmin_lcot_p_supp][6]
+                    )
 
             # Update the previous segment pressure for use in fuel extraction calc
             # m_dot_seg isnt changing with grade and diameter, since pipe is
             # rated to original pipe MAOP
             prev_ASME_pressure = pressure_in_Pa
-            m_dot_in_prev = m_dot_seg
+
+            min_cost_index = res[cr_i][ps_i]["costs"].index(
+                min(res[cr_i][ps_i]["costs"])
+            )
+
+            m_dot_in_prev = res[cr_i][ps_i]["m_dot_in"][min_cost_index]
 
     # Choose lowest LCOT solution based on for each CR
     cr_lcot_sum = [0] * n_cr
@@ -619,6 +661,54 @@ def parallel_loop(
     return new_pipes_f, combined_pipe
 
 
+def add_pipe_segments(
+    p_name: str,
+    length_km: float,
+    diameter_mm: float,
+    from_node: bp_plc.Node,
+    to_node: bp_plc.Node,
+    composition: bp_plc.Composition,
+    ro: float,
+) -> tuple:
+    nodes = {}
+    pipes = {}
+
+    pipes[p_name] = bp_plc.Pipe(
+        name=p_name,
+        from_node=from_node,
+        to_node=to_node,
+        diameter_mm=diameter_mm,
+        length_km=length_km,
+        roughness_mm=ro,
+    )
+    node_base_name = f"{from_node.name}_{p_name}"
+
+    if (length_km * gl.KM2M) / (diameter_mm * gl.MM2M) > gl.SEG_MAX:
+        length_sub_segment = gl.SEG_MAX * (diameter_mm * gl.MM2M) / gl.KM2M
+        n_nodes = int(np.floor(length_km / length_sub_segment))
+        length_sub_segment = length_km / (n_nodes + 1)
+        for subseg in range(n_nodes):
+            new_node_name = f"{node_base_name}_subseg_{subseg}"
+            nodes[new_node_name] = bp_plc.Node(
+                name=new_node_name,
+                X=composition,
+            )
+            to_node = nodes[new_node_name]
+            new_pipe_name = f"{p_name}_subseg_{subseg}"
+            pipes[new_pipe_name] = bp_plc.Pipe(
+                name=new_pipe_name,
+                from_node=from_node,
+                to_node=to_node,
+                diameter_mm=diameter_mm,
+                length_km=length_sub_segment,
+                roughness_mm=ro,
+            )
+            from_node = to_node
+        pipes[p_name].from_node = from_node
+        pipes[p_name].length_km = length_sub_segment
+    return nodes, pipes
+
+
 def make_loop_network(
     l_loop: float,
     composition: bp_plc.Composition,
@@ -667,15 +757,17 @@ def make_loop_network(
             # Make loop cxn node
             l_cxn_name = name
 
-            p_name = "loop_2_l_cxn"
-            pipes[p_name] = bp_plc.Pipe(
-                name=p_name,
+            nodes_tmp, pipes_tmp = add_pipe_segments(
+                p_name="loop_2_l_cxn",
+                length_km=l_loop,
+                diameter_mm=d_loop,
                 from_node=n_ds_in,
                 to_node=nodes[l_cxn_name],
-                diameter_mm=d_loop,
-                length_km=l_loop,
-                roughness_mm=roughness_mm,
+                composition=composition,
+                ro=roughness_mm,
             )
+            nodes.update(nodes_tmp)
+            pipes.update(pipes_tmp)
 
             l_done = True
         if not l_done and cumsum_offtakes[ot_i] < l_loop < cumsum_offtakes[ot_i + 1]:
@@ -683,46 +775,59 @@ def make_loop_network(
             l_cxn_name = "loop_cxn"
             nodes[l_cxn_name] = bp_plc.Node(name=l_cxn_name, X=composition)
             node_index += 1
-            p_name = "main_2_l_cxn"
-            pipes[p_name] = bp_plc.Pipe(
-                name=p_name,
+
+            nodes_tmp, pipes_tmp = add_pipe_segments(
+                p_name="main_2_l_cxn",
+                length_km=l_loop - cumsum_offtakes[ot_i],
+                diameter_mm=d_main,
                 from_node=prev_node,
                 to_node=nodes[l_cxn_name],
-                diameter_mm=d_main,
-                length_km=l_loop - cumsum_offtakes[ot_i],
-                roughness_mm=roughness_mm,
+                composition=composition,
+                ro=roughness_mm,
             )
-            p_name = "loop_2_l_cxn"
-            pipes[p_name] = bp_plc.Pipe(
-                name=p_name,
+            nodes.update(nodes_tmp)
+            pipes.update(pipes_tmp)
+
+            nodes_tmp, pipes_tmp = add_pipe_segments(
+                p_name="loop_2_l_cxn",
+                length_km=l_loop,
+                diameter_mm=d_loop,
                 from_node=n_ds_in,
                 to_node=nodes[l_cxn_name],
-                diameter_mm=d_loop,
-                length_km=l_loop,
-                roughness_mm=roughness_mm,
+                composition=composition,
+                ro=roughness_mm,
             )
-            p_name = "l_cxn_2_main"
-            pipes[p_name] = bp_plc.Pipe(
-                name=p_name,
+            nodes.update(nodes_tmp)
+            pipes.update(pipes_tmp)
+
+            nodes_tmp, pipes_tmp = add_pipe_segments(
+                p_name="l_cxn_2_main",
+                length_km=cumsum_offtakes[ot_i + 1] - l_loop,
+                diameter_mm=d_main,
                 from_node=nodes[l_cxn_name],
                 to_node=nodes[name],
-                diameter_mm=d_main,
-                length_km=cumsum_offtakes[ot_i + 1] - l_loop,
-                roughness_mm=roughness_mm,
+                composition=composition,
+                ro=roughness_mm,
             )
+            nodes.update(nodes_tmp)
+            pipes.update(pipes_tmp)
+
             prev_node = nodes[name]
 
             l_done = True
         else:
-            p_name = f"main_{ot_i}"
-            pipes[p_name] = bp_plc.Pipe(
-                name=p_name,
+            nodes_tmp, pipes_tmp = add_pipe_segments(
+                p_name=f"main_{ot_i}",
+                length_km=offtakes[ot_i],
+                diameter_mm=d_main,
                 from_node=prev_node,
                 to_node=nodes[name],
-                diameter_mm=d_main,
-                length_km=offtakes[ot_i],
-                roughness_mm=roughness_mm,
+                composition=composition,
+                ro=roughness_mm,
             )
+            nodes.update(nodes_tmp)
+            pipes.update(pipes_tmp)
+
             prev_node = nodes[name]
 
     end_node = nodes[name]
@@ -828,7 +933,7 @@ def get_loop_length(
                 # Thus this diameter/grade is not valid
                 if l_loop == l_total:
                     return returning_loop_length(
-                        np.nan, end_pipes, 0, costing_params, design_params
+                        np.nan, end_pipes, 0, costing_params, design_params, end_node
                     )
             continue
         p_vals.append(end_node.pressure)
@@ -836,13 +941,13 @@ def get_loop_length(
         # If 0 looping, and outlet pressure is greater than target, then no looping is the cheapest option
         if end_node.pressure > p_out_target and l_loop == 0:
             return returning_loop_length(
-                0, end_pipes, compressors, costing_params, design_params
+                0, end_pipes, compressors, costing_params, design_params, end_node
             )
         # If end pressure is less than target at 100% looping, then this combo is not a solution, since even with
         # 100% looping, there is too much pressure drop
         if end_node.pressure < p_out_target and l_loop == l_total:
             return returning_loop_length(
-                np.nan, end_pipes, 0, costing_params, design_params
+                np.nan, end_pipes, 0, costing_params, design_params, end_node
             )
 
     iter = 0
@@ -867,18 +972,18 @@ def get_loop_length(
         # If it is close to the full loop just return full loop
         if abs(l_loop - l_total) < gl.PL_LEN_TOL:
             return returning_loop_length(
-                l_total, end_pipes, compressors, costing_params, design_params
+                l_total, end_pipes, compressors, costing_params, design_params, end_node
             )
         # If it is close to zero loop and 0 wasn't a solution, then not a solution
         if abs(l_loop) < gl.PL_LEN_TOL:
             return returning_loop_length(
-                np.nan, end_pipes, 0, costing_params, design_params
+                np.nan, end_pipes, 0, costing_params, design_params, end_node
             )
 
         # If the bounds are too close then break out
         if len(l_vals) > 1 and abs(l_vals[-1] - l_vals[-2]) < gl.PL_LEN_TOL:
             return returning_loop_length(
-                l_loop, end_pipes, compressors, costing_params, design_params
+                l_loop, end_pipes, compressors, costing_params, design_params, end_node
             )
 
         looping, end_node, end_pipes, compressors = make_loop_network(
@@ -925,7 +1030,7 @@ def get_loop_length(
         iter += 1
 
     return returning_loop_length(
-        l_loop, end_pipes, compressors, costing_params, design_params
+        l_loop, end_pipes, compressors, costing_params, design_params, end_node
     )
 
 
@@ -935,6 +1040,7 @@ def returning_loop_length(
     compressors: dict,
     costing_params: bp_cost.Costing_params,
     design_params: Design_params,
+    end_node,
 ) -> tuple:
     """
     Return the length and mdot of the segment
@@ -963,4 +1069,4 @@ def returning_loop_length(
             "elec": fuel_use_elec,
         }
 
-    return length, mdot, comp_out
+    return length, mdot, comp_out, end_node.pressure

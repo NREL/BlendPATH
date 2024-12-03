@@ -28,6 +28,7 @@ class Compressor:
     eta_driver_elec: float = np.nan
     eta_driver_elec_calc: float = np.nan
     eta_driver_elec_used: float = np.nan
+    thermo_curvefit: bool = False
 
     def __post_init__(self):
         self.to_node.pressure = self.pressure_out_mpa_g * gl.MPA2PA
@@ -38,41 +39,10 @@ class Compressor:
         """
         return self.to_node.pressure / self.from_node.pressure
 
-    def get_power(self, m_dot: float) -> float:
+    def get_power(self, h_1: float, s_1: float, h_2_s: float, m_dot: float) -> float:
         """
         Calculate power based isentropic efficiency
         """
-        p_1 = self.from_node.pressure + ct.one_atm
-        X = self.from_node.X.x_str
-        ctu.gas.TPX = gl.T_FIXED, p_1, X
-        h_1 = ctu.gas.h
-        s_1 = ctu.gas.s
-        # Used if cantera doesn't return valid value. Averages
-        # 5% plus and minus values for pressure
-        offset = 0.001
-        while np.isnan(h_1) or np.isnan(s_1):
-            ctu.gas.TPX = gl.T_FIXED, p_1 * (1 + offset), X
-            h_1_1 = ctu.gas.h
-            s_1_1 = ctu.gas.s
-            ctu.gas.TPX = gl.T_FIXED, p_1 * (1 - offset), X
-            h_1_2 = ctu.gas.h
-            s_1_2 = ctu.gas.s
-            h_1 = (h_1_1 + h_1_2) / 2
-            s_1 = (s_1_1 + s_1_2) / 2
-            offset += 0.001
-
-        # Get state 2 based on isentropic s1=s2
-        s_2_s = s_1
-        p_2 = self.to_node.pressure + ct.one_atm
-        try:
-            ctu.gas.SPX = s_2_s, p_2, X
-            h_2_s = ctu.gas.h
-        except ct.CanteraError:
-            ctu.gas.SPX = s_2_s, p_2 * (1 + 0.0001), X
-            h_2_s_1 = ctu.gas.h
-            ctu.gas.SPX = s_2_s, p_2 * (1 - 0.0001), X
-            h_2_s_2 = ctu.gas.h
-            h_2_s = (h_2_s_1 + h_2_s_2) / 2
 
         # Enthalpy change (isentropic)
         delta_h_s = h_2_s - h_1  # Adiabatic head
@@ -86,12 +56,12 @@ class Compressor:
         self.shaft_power_MW = W_dot_shaft * gl.W2MW
         return W_dot_shaft
 
-    def get_fuel_use(self, m_dot: float) -> float:
+    def get_fuel_use(self, h_1: float, s_1: float, h_2_s: float, m_dot: float) -> float:
         """
         Calculate compressor fuel usage
         """
         # Leave this before return to calculate power
-        W_dot_shaft = self.get_power(m_dot)
+        W_dot_shaft = self.get_power(h_1, s_1, h_2_s, m_dot)
         self.flow_mdot = m_dot
 
         # But still requies calculating power

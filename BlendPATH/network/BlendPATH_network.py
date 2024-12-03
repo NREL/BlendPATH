@@ -53,7 +53,7 @@ class BlendPATH_network:
             [d.flowrate_MMBTU_day for d in self.demand_nodes.values()]
         )
         # Check if need more segments if some pipes are too long
-        # self.check_segmentation()
+        self.check_segmentation()
 
     def assign_connections(self) -> None:
         """
@@ -110,7 +110,7 @@ class BlendPATH_network:
         composition_df = pd.read_excel(filename, "COMPOSITION")
 
         # Load in composition
-        composition = plc.Composition.from_df(composition_df)
+        composition = plc.Composition.from_df(composition_df, interp=False)
 
         # Create nodes
         nodes = {}
@@ -270,7 +270,7 @@ class BlendPATH_network:
             """
             c = (m_dot / (A * (mw / zrt * d / f / L) ** 0.5)) ** 2
             if c > p_in**2:
-                return p_in * 0.95
+                return p_in * 0.99
             return (p_in**2 - c) ** 0.5
 
         def get_new_node(n: plc.Node, p: plc.Pipe) -> plc.Node:
@@ -303,7 +303,7 @@ class BlendPATH_network:
                 mw=up_node.mw,
                 zrt=1 * ctu.gas_constant * gl.T_FIXED,
                 d=pipe.diameter_mm * gl.MM2M,
-                f=0.01,
+                f=0.001,
                 L=pipe.length_km * gl.KM2M,
             )
             if p_out == up_node.pressure:
@@ -437,10 +437,19 @@ class BlendPATH_network:
             dn.recalc_mdot()
         self.reassign_offtakes()
 
-    def solve(self, c_relax: float = gl.RELAX_FACTOR, cr_max: float = 1.5) -> None:
+    def solve(
+        self,
+        c_relax: float = gl.RELAX_FACTOR,
+        cr_max: float = 1.5,
+        low_p_buffer: float = 0.00,
+    ) -> None:
         """
         Solve network pressures
         """
+        # Check if we need linear interpolation on composition
+        if self.thermo_curvefit and not hasattr(self.composition, "curve_fit_rho"):
+            self.composition.make_linear_interp()
+
         n_nodes = len(self.nodes)
         self.n_nodes = n_nodes
         supply_node = list(self.supply_nodes.values())[0]
@@ -463,8 +472,7 @@ class BlendPATH_network:
             jacobian, m_dot = self.make_jacobian()
             nodal_flow = np.dot(m_dot, np.ones(n_nodes))
 
-            delta_flow = m_dot_target - nodal_flow
-            delta_flow = np.delete(delta_flow, self.ignore_nodes)
+            delta_flow = np.delete(m_dot_target - nodal_flow, self.ignore_nodes)
 
             delta_p = np.linalg.solve(jacobian, delta_flow)
 
@@ -481,41 +489,55 @@ class BlendPATH_network:
                     raise ValueError("Negative pressure")
 
             # Assumes everything is ordered
-            p_index = 0
             for node in self.nodes.values():
-                node.update_state(
-                    gl.T_FIXED,
-                    p_solving[p_index],
-                    self.composition,
-                    eos_type=self.eos,
-                )
-                p_index = p_index + 1
+                node.pressure = p_solving[node.index]
 
             err = np.max(np.absolute(delta_flow))
 
             n_iter += 1
 
-            for comp in self.compressors.values():
-                to_c = comp.to_node.index
-                from_c = comp.from_node.index
-                comp_flow = -1 * nodal_flow[to_c]
-                if to_c == n_nodes - 1:
-                    # If there is a compressor at the end of the segment
-                    comp_flow = m_dot_sum
-                m_dot_target[from_c] = comp_flow
-                # If using fuel extraction, then reduce mdot after comp
-                fuel_use = comp.get_fuel_use(comp_flow)
-                if not comp.fuel_extract:
-                    continue
-                m_dot_target[from_c] += fuel_use
-                m_dot_target[supply_node.node.index] -= fuel_use
+            if self.compressors:
+                comp_p = np.array(
+                    [
+                        [comp.from_node.pressure, comp.to_node.pressure]
+                        for comp in self.compressors.values()
+                    ]
+                )
+                comp_h_1 = self.composition.get_curvefit_h(comp_p[:, 0])
+                comp_s_1 = self.composition.get_curvefit_s(comp_p[:, 0])
+                comp_h_2_s = self.composition.get_curvefit_h_2d(comp_p[:, 1], comp_s_1)
+
+                for c_i, comp in enumerate(self.compressors.values()):
+                    to_c = comp.to_node.index
+                    from_c = comp.from_node.index
+                    comp_flow = -1 * nodal_flow[to_c]
+                    if not comp.to_node.connections["Pipe"]:
+                        # If there is a compressor at the end of the segment
+                        comp_flow = m_dot_sum
+                    m_dot_target[from_c] = comp_flow
+                    # If using fuel extraction, then reduce mdot after comp
+                    fuel_use = comp.get_fuel_use(
+                        comp_h_1[c_i], comp_s_1[c_i], comp_h_2_s[c_i], comp_flow
+                    )
+                    if not comp.fuel_extract:
+                        continue
+                    m_dot_target[from_c] += fuel_use
+                    m_dot_target[supply_node.node.index] -= fuel_use
 
             if n_iter > gl.MAX_ITER:
                 raise ValueError(f"Could not converge in {gl.MAX_ITER} iterations")
 
         # Chcck for any values below minimum pressure
-        if np.any(gl.MIN_PRES - p_solving >= 20000):
+        if np.any(gl.MIN_PRES - p_solving >= gl.MIN_PRES * low_p_buffer):
             raise ValueError("Pressure below threshold")
+
+        for node in self.nodes.values():
+            node.update_state(
+                gl.T_FIXED,
+                p_solving[node.index],
+                self.composition,
+                eos_type=self.eos,
+            )
 
         # Assign maximum pressure to pipe based on calculated node pressure
         for pipe in self.pipes.values():
@@ -556,15 +578,24 @@ class BlendPATH_network:
         jacobian = np.zeros((n_nodes, n_nodes))
         m_dot = np.zeros((n_nodes, n_nodes))
 
+        pipe_avgs = np.array([pipe.get_p_avg() for pipe in self.pipes.values()])
+        rho_avgs, z_avgs = self.composition.get_curvefit_rho_z(pipe_avgs)
+        mu = self.composition.get_curvefit_mu(pipe_avgs)
+
         # Loop thru pipes
-        for pipe in self.pipes.values():
+        for p_i, pipe in enumerate(self.pipes.values()):
             to_node = pipe.to_node
             from_node = pipe.from_node
             to_node_index = to_node.index
             from_node_index = from_node.index
 
             # Assign based on connections and ignore nodes
-            dm_dp, p_in, p_out = pipe.get_derivative(self.eos)
+            p_in = pipe.from_node.pressure
+            p_out = pipe.to_node.pressure
+            dm_dp, m_dot_pipe = pipe.get_d_and_mdot(
+                rho_avgs[p_i], z_avgs[p_i], mu[p_i], self.eos
+            )
+
             if (
                 to_node_index not in self.ignore_nodes
                 and from_node_index not in self.ignore_nodes
@@ -577,7 +608,6 @@ class BlendPATH_network:
                 jacobian[from_node_index][from_node_index] -= dm_dp * p_in
 
             # Assign mass flow rates
-            m_dot_pipe = pipe.get_mdot(self.eos)
             m_dot[to_node_index, from_node_index] += m_dot_pipe
             m_dot[from_node_index, to_node_index] -= m_dot_pipe
 
@@ -741,7 +771,7 @@ class BlendPATH_network:
         """
         Unused function to check if a pipe needs further segmentation based on L/D ratio
         """
-        seg_max = 30000
+        seg_max = gl.SEG_MAX
         node_index = len(self.nodes.keys()) - 1
         all_pipe_names = list(self.pipes.keys())
         for pipe_name in all_pipe_names:
@@ -749,10 +779,12 @@ class BlendPATH_network:
             if (pipe.length_km * gl.KM2M) / (pipe.diameter_mm * gl.MM2M) > seg_max:
                 lenth_sub_segment = seg_max * (pipe.diameter_mm * gl.MM2M) / gl.KM2M
                 n_nodes = int(np.floor(pipe.length_km / lenth_sub_segment))
+                lenth_sub_segment = pipe.length_km / (n_nodes + 1)
                 from_node = pipe.from_node
-                from_node.connections["Pipe"].remove(pipe.name)
+                from_node_name_fixed = from_node.name
+                from_node.connections["Pipe"].remove(pipe)
                 for subseg in range(n_nodes):
-                    new_node_name = f"{from_node.name}_{subseg}"
+                    new_node_name = f"{from_node_name_fixed}_{subseg}"
                     # Keep addng underscript till it is a unique name
                     while new_node_name in self.nodes.keys():
                         new_node_name = f"{new_node_name}_"
@@ -778,11 +810,17 @@ class BlendPATH_network:
                         grade=pipe.grade,
                         p_max_mpa_g=pipe.p_max_mpa_g,
                     )
+
                     from_node = to_node
 
-                length_remaining = pipe.length_km % lenth_sub_segment
+                length_remaining = lenth_sub_segment
                 pipe.from_node = from_node
                 pipe.length_km = length_remaining
+        self.set_thermo_curvefit(self.thermo_curvefit)
+        self.set_eos(self.eos)
+        self.assign_node_indices()
+        self.assign_ignore_nodes()
+        self.assign_connections()
 
     def to_file(self, filename: str) -> None:
         """
@@ -923,6 +961,8 @@ class BlendPATH_network:
             node.thermo_curvefit = thermo_curvefit
         for pipe in self.pipes.values():
             pipe.thermo_curvefit = thermo_curvefit
+        for comp in self.compressors.values():
+            comp.thermo_curvefit = thermo_curvefit
 
 
 @dataclass

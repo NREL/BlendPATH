@@ -10,16 +10,17 @@ authors = [
     {name="Evan Reznicek",email="Evan.Reznicek@nrel.gov"},
     {name="Kevin Topolski",email="Kevin.Topolski@nrel.gov"},
 ]
-version = '2.0.3'
+version = '2.0.4'
 readme = "README.md"
-requires-python  = "==3.8.19"
+requires-python  = ">=3.8"
 dependencies = [
     "numpy",
     "pandas",
-    "cantera==3.0.0",
+    "cantera",
     "importlib_resources",
     "openpyxl",
+    "scipy",
     "xlsxwriter",
-    "ProFAST@git+https://github.com/NREL/ProFAST",
+    "ProFAST",
     "pytest"
 ]

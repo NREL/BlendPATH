@@ -196,8 +196,19 @@ def additional_compressors(
                             fuel_extract=not design_params.new_comp_elec,
                         )
 
+                        comp_h_1 = sn.node.X.get_curvefit_h(
+                            supply_comp.from_node.pressure
+                        )
+                        comp_s_1 = sn.node.X.get_curvefit_s(
+                            supply_comp.from_node.pressure
+                        )
+                        comp_h_2_s = sn.node.X.get_curvefit_h_2d(
+                            supply_comp.to_node.pressure, comp_s_1
+                        )
                         supply_comp_fuel = {
-                            "gas": supply_comp.get_fuel_use(m_dot=m_dot_seg)
+                            "gas": supply_comp.get_fuel_use(
+                                comp_h_1, comp_s_1, comp_h_2_s, m_dot=m_dot_seg
+                            )
                             * ps.HHV
                             * gl.MW2MMBTUDAY
                             / capacity,
@@ -332,7 +343,7 @@ def additional_compressors(
                 pipe_segmented = True
 
                 # Check if it overlaps with already existing node:
-                if l_comps[comp_len_i] - len_added == 0:
+                if abs(l_comps[comp_len_i] - len_added) < 0.01:
                     from_comp_name = new_nodes["node_name"][-1]
 
                 else:
@@ -385,17 +396,24 @@ def additional_compressors(
                     pipe_name = f"{pipe.name}_remaining"
                     from_node = pipe_from_node
                     pipe_len_final = pipe_len_remaining - len_added
-                # Add pipes as normal
-                new_pipes["pipe_name"].append(pipe_name)
-                new_pipes["from_node"].append(from_node)
-                new_pipes["to_node"].append(pipe.to_node.name)
-                new_pipes["length_km"].append(pipe_len_final)
-                new_pipes["roughness_mm"].append(pipe.roughness_mm)
-                new_pipes["diameter_mm"].append(pipe.diameter_mm)
-                new_pipes["thickness_mm"].append(pipe.thickness_mm)
-                new_pipes["steel_grade"].append(pipe.grade)
-                # Update total pipe length
-                len_added += pipe_len_final
+                if pipe_len_final > 0.01:
+                    # Add pipes as normal
+                    new_pipes["pipe_name"].append(pipe_name)
+                    new_pipes["from_node"].append(from_node)
+                    new_pipes["to_node"].append(pipe.to_node.name)
+                    new_pipes["length_km"].append(pipe_len_final)
+                    new_pipes["roughness_mm"].append(pipe.roughness_mm)
+                    new_pipes["diameter_mm"].append(pipe.diameter_mm)
+                    new_pipes["thickness_mm"].append(pipe.thickness_mm)
+                    new_pipes["steel_grade"].append(pipe.grade)
+                    # Update total pipe length
+                    len_added += pipe_len_final
+                else:
+                    new_nodes["node_name"].pop()
+                    new_nodes["p_max_mpa_g"].pop()
+                    # new_pipes["to_node"][-1] = pipe.to_node.name
+                    new_comps["to_node"][-1] = pipe.to_node.name
+                    pass
 
         new_nodes["node_name"].append(pipe.to_node.name)
         new_nodes["p_max_mpa_g"].append(p_max_seg)
