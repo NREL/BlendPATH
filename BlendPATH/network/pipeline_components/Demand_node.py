@@ -17,7 +17,6 @@ class Demand_node:
 
     def __post_init__(self) -> None:
         self.recalc_mdot()
-        self.flowrate_MMBTU_day = self.flowrate_MW * gl.MW2MMBTUDAY
         self.node.is_demand = True
 
     def recalc_mdot(self) -> None:
@@ -26,3 +25,10 @@ class Demand_node:
         """
         hhv = self.node.heating_value()
         self.flowrate_mdot = self.flowrate_MW / hhv  # kg/s
+
+    @property
+    def flowrate_MMBTU_day(self):
+        """
+        Get flow rate in MMBTU/day
+        """
+        return self.flowrate_MW * gl.MW2MMBTUDAY

@@ -33,7 +33,8 @@ class Compressor:
     def __post_init__(self):
         self.to_node.pressure = self.pressure_out_mpa_g * gl.MPA2PA
 
-    def get_cr_ratio(self) -> float:
+    @property
+    def compression_ratio(self) -> float:
         """
         Get compression ratio - to_node is high pressure than from_node
         """
@@ -107,7 +108,8 @@ class Compressor:
 
         return fuel_mdot_kg_s
 
-    def get_fuel_use_MMBTU_hr(self) -> float:
+    @property
+    def fuel_use_MMBTU_hr(self) -> float:
         """
         Get fuel use in units of MMBTU/hr
         """

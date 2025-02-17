@@ -686,7 +686,7 @@ class BlendPATH_scenario:
                     comp.addl_rating,
                     comp.cost,
                     comp.revamp_cost,
-                    comp.get_fuel_use_MMBTU_hr(),
+                    comp.fuel_use_MMBTU_hr,
                     comp.fuel_electric_W / gl.KW2W,
                 )
             )
@@ -1040,8 +1040,8 @@ class BlendPATH_scenario:
                     comp_type,
                     comp_length,
                     comp_length * gl.KM2MI,
-                    comp.get_cr_ratio(),
-                    comp.get_fuel_use_MMBTU_hr(),
+                    comp.compression_ratio,
+                    comp.fuel_use_MMBTU_hr,
                     comp.shaft_power_MW,
                     comp.shaft_power_MW * gl.MW2HP,
                     comp.fuel_electric_W / gl.KW2W,

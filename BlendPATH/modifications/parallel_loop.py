@@ -81,9 +81,13 @@ def parallel_loop(
         for _ in range(n_cr)
     ]
 
+    # boolean to check if CR can be skipped due to lack of solutions
+    skip_cr: bool = False
     # Loop thru compression ratios
     for cr_i, CR_ratio in enumerate(max_CR):
-
+        if skip_cr:
+            skip_cr = False
+            continue
         # Loop thru pipe segments
         prev_ASME_pressure = -1
         m_dot_in_prev = nw.pipe_segments[-1].mdot_out
@@ -368,6 +372,10 @@ def parallel_loop(
             # rated to original pipe MAOP
             prev_ASME_pressure = pressure_in_Pa
 
+            if not res[cr_i][ps_i]["costs"]:
+                skip_cr = True
+                break
+
             min_cost_index = res[cr_i][ps_i]["costs"].index(
                 min(res[cr_i][ps_i]["costs"])
             )
@@ -384,6 +392,8 @@ def parallel_loop(
             ]
         )
     cr_min_index = cr_lcot_sum.index(min(cr_lcot_sum))
+    if cr_lcot_sum[cr_min_index] == np.inf:
+        raise ValueError("No solutions found")
     res = res[cr_min_index]
 
     ######### GET MINIMUM CASE
