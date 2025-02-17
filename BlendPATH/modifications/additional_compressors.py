@@ -780,7 +780,7 @@ def get_num_compressors(
                 for cs in addl_comps.compressors.values():
                     cs_fuel.append(cs.fuel_mdot)
                     cs_fuel_elec.append(cs.fuel_electric_W)
-                    if cs.get_cr_ratio() > cr_max:
+                    if cs.compression_ratio > cr_max:
                         cs_ratio_check = True
                         break
                 if cs_ratio_check:

@@ -28,7 +28,7 @@ class BlendPATH_network:
         compressors: dict = None,
         composition: list = None,
         eos: _EOS_OPTIONS = "rk",
-        thermo_curvefit: bool = False,
+        thermo_curvefit: bool = True,
     ) -> None:
         """
         Initialize a network
@@ -48,10 +48,6 @@ class BlendPATH_network:
         self.assign_ignore_nodes()
         self.assign_connections()
 
-        # Calculate network capacity
-        self.capacity_MMBTU_day = sum(
-            [d.flowrate_MMBTU_day for d in self.demand_nodes.values()]
-        )
         # Check if need more segments if some pipes are too long
         self.check_segmentation()
 
@@ -907,8 +903,8 @@ class BlendPATH_network:
                     comp.name,
                     comp.from_node.name,
                     comp.to_node.name,
-                    comp.get_cr_ratio(),
-                    comp.get_fuel_use_MMBTU_hr(),
+                    comp.compression_ratio,
+                    comp.fuel_use_MMBTU_hr,
                     comp.shaft_power_MW,
                     comp.shaft_power_MW * gl.MW2HP,
                     comp.eta_comp_s,
@@ -963,6 +959,13 @@ class BlendPATH_network:
             pipe.thermo_curvefit = thermo_curvefit
         for comp in self.compressors.values():
             comp.thermo_curvefit = thermo_curvefit
+
+    @property
+    def capacity_MMBTU_day(self):
+        """
+        Network capacity, as sum of demands, in MMBTU/day
+        """
+        return sum([d.flowrate_MMBTU_day for d in self.demand_nodes.values()])
 
 
 @dataclass

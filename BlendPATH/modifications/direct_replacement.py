@@ -229,12 +229,12 @@ def direct_replacement(
                         max_cr = []
                         for comp in nw.compressors.values():
                             # Check compression ratio
-                            this_cr = comp.get_cr_ratio()
+                            this_cr = comp.compression_ratio
                             if (this_cr > cr_max_total) and (
                                 comp.name != "Supply compressor"
                             ):
                                 raise ValueError("Compression ratio")
-                            max_cr.append(comp.get_cr_ratio())
+                            max_cr.append(comp.compression_ratio)
 
                             # Get CAPEX of compressors
                             if comp.name == "Supply compressor":

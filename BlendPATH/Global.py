@@ -28,7 +28,7 @@ SOLVER_TOL = 1e-3
 MIN_PRES = 20 * BAR2PA
 
 # Parallel loop solver
-PL_LEN_TOL = 0.01
+PL_LEN_TOL = 0.001
 
 # Max segment L/D
 SEG_MAX = 27_500
